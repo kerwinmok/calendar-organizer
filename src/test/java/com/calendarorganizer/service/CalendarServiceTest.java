@@ -44,7 +44,7 @@ class CalendarServiceTest {
         ScheduleParserService parserService = new ScheduleParserService(
                 new RuleParser(),
                 new OllamaProvider("http://127.0.0.1:1", "none", HttpClient.newHttpClient()),
-                new GeminiProvider("", "gemini-2.5-flash", "http://127.0.0.1:1", HttpClient.newHttpClient())
+                new GeminiProvider("", "gemini-flash-lite-latest", "http://127.0.0.1:1", HttpClient.newHttpClient())
         );
         service = new CalendarService(
                 repo,

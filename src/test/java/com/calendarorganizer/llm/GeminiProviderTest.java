@@ -36,13 +36,17 @@ class GeminiProviderTest {
     void sendsApiKeyHeaderAndParsesCandidateJson() throws IOException, LlmException {
         AtomicReference<String> receivedKeyHeader = new AtomicReference<>();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/models/gemini-2.5-flash:generateContent", exchange -> {
+        server.createContext("/models/gemini-flash-lite-latest:generateContent", exchange -> {
             receivedKeyHeader.set(exchange.getRequestHeaders().getFirst("x-goog-api-key"));
             String modelJson = "{\"events\":[],\"recurringRules\":[{\"title\":\"Work\",\"daysOfWeek\":[\"MONDAY\"],\"startTime\":\"07:00\",\"endTime\":\"18:00\",\"category\":\"WORK\"}],\"goals\":[],\"sleepTime\":\"00:00\"}";
 
+            JsonObject thoughtPart = new JsonObject();
+            thoughtPart.addProperty("thought", true);
+            thoughtPart.addProperty("text", "thinking notes");
             JsonObject part = new JsonObject();
             part.addProperty("text", modelJson);
             JsonArray parts = new JsonArray();
+            parts.add(thoughtPart);
             parts.add(part);
             JsonObject content = new JsonObject();
             content.add("parts", parts);
@@ -62,7 +66,7 @@ class GeminiProviderTest {
         server.start();
 
         String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        GeminiProvider provider = new GeminiProvider("test-secret-key", "gemini-2.5-flash", baseUrl, HttpClient.newHttpClient());
+        GeminiProvider provider = new GeminiProvider("test-secret-key", "gemini-flash-lite-latest", baseUrl, HttpClient.newHttpClient());
 
         assertTrue(provider.isAvailable());
         ParseResult result = provider.parse("i work monday 7-6pm", LocalDate.of(2026, 11, 16));
@@ -74,16 +78,16 @@ class GeminiProviderTest {
 
     @Test
     void handlesMissingKeyAndHttpFailure() throws IOException {
-        GeminiProvider noKey = new GeminiProvider("", "gemini-2.5-flash", "http://127.0.0.1", HttpClient.newHttpClient());
+        GeminiProvider noKey = new GeminiProvider("", "gemini-flash-lite-latest", "http://127.0.0.1", HttpClient.newHttpClient());
         assertFalse(noKey.isAvailable());
         assertThrows(LlmException.class, () -> noKey.parse("work mon 7-6pm", LocalDate.of(2026, 11, 16)));
 
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/models/gemini-2.5-flash:generateContent", exchange -> exchange.sendResponseHeaders(401, -1));
+        server.createContext("/models/gemini-flash-lite-latest:generateContent", exchange -> exchange.sendResponseHeaders(401, -1));
         server.start();
 
         String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        GeminiProvider badKey = new GeminiProvider("bad-key", "gemini-2.5-flash", baseUrl, HttpClient.newHttpClient());
+        GeminiProvider badKey = new GeminiProvider("bad-key", "gemini-flash-lite-latest", baseUrl, HttpClient.newHttpClient());
         assertThrows(LlmException.class, () -> badKey.parse("work mon 7-6pm", LocalDate.of(2026, 11, 16)));
     }
 }

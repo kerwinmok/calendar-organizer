@@ -17,7 +17,7 @@ import java.time.LocalDate;
 public class GeminiProvider implements LlmProvider {
 
     public static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-    public static final String DEFAULT_MODEL = "gemini-2.5-flash";
+    public static final String DEFAULT_MODEL = "gemini-flash-lite-latest";
 
     private final String apiKey;
     private final String model;
@@ -138,11 +138,30 @@ public class GeminiProvider implements LlmProvider {
         if (parts.isEmpty()) {
             throw new LlmException("Gemini candidate had empty parts.");
         }
-        JsonObject firstPart = parts.get(0).getAsJsonObject();
-        if (!firstPart.has("text") || firstPart.get("text").isJsonNull()) {
+        String fallbackText = null;
+        for (JsonElement element : parts) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject partObj = element.getAsJsonObject();
+            if (!partObj.has("text") || partObj.get("text").isJsonNull()) {
+                continue;
+            }
+            String text = partObj.get("text").getAsString();
+            if (fallbackText == null) {
+                fallbackText = text;
+            }
+            boolean isThought = partObj.has("thought")
+                    && !partObj.get("thought").isJsonNull()
+                    && partObj.get("thought").getAsBoolean();
+            if (!isThought) {
+                return text;
+            }
+        }
+        if (fallbackText == null) {
             throw new LlmException("Gemini part missing text.");
         }
-        return firstPart.get("text").getAsString();
+        return fallbackText;
     }
 
     private static String readEnv(String key, String fallback) {
