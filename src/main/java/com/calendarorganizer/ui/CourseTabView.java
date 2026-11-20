@@ -6,6 +6,7 @@ import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
 import com.calendarorganizer.service.CalendarService;
+import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -96,6 +97,7 @@ public class CourseTabView extends BorderPane {
 
         VBox.setVgrow(courseListView, Priority.ALWAYS);
         courseListView.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            flushPendingEdits();
             if (newVal != null) {
                 selectedCourse = newVal;
                 courseHeading.setText(newVal.getDisplayName());
@@ -222,7 +224,7 @@ public class CourseTabView extends BorderPane {
         editor.setDisable(true);
         VBox.setVgrow(editor, Priority.ALWAYS);
         editor.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (!loadingEditor && selectedItem != null) {
+            if (!loadingEditor && selectedItem != null && selectedItem.isMarkdown()) {
                 setDirty(true);
             }
         });
@@ -242,9 +244,19 @@ public class CourseTabView extends BorderPane {
     }
 
     private void selectSection(CourseSection section) {
+        if (section == this.selectedSection) {
+            return;
+        }
+        flushPendingEdits();
         this.selectedSection = section;
         updateSectionButtons();
         refreshItems();
+    }
+
+    public void flushPendingEdits() {
+        if (dirty && selectedItem != null && selectedItem.isMarkdown()) {
+            handleSaveItem();
+        }
     }
 
     private void updateSectionButtons() {
@@ -327,6 +339,7 @@ public class CourseTabView extends BorderPane {
     }
 
     private void applyCourseFilter() {
+        flushPendingEdits();
         List<Course> filtered = new ArrayList<>();
         for (Course course : allCourses) {
             if (filterText.isEmpty() || course.getDisplayName().toLowerCase(Locale.ROOT).contains(filterText)) {
@@ -363,7 +376,7 @@ public class CourseTabView extends BorderPane {
                 clearEditor();
             }
         } catch (IOException ex) {
-            publishStatus("Failed to list markdown files: " + ex.getMessage());
+            publishStatus("Failed to list course files: " + ex.getMessage());
         }
     }
 
@@ -408,6 +421,7 @@ public class CourseTabView extends BorderPane {
             courseManager.deleteCourse(selectedCourse);
             selectedCourse = null;
             selectedItem = null;
+            setDirty(false);
             refreshCourses();
             publishStatus("Deleted course: " + name);
         } catch (IOException ex) {
@@ -448,6 +462,7 @@ public class CourseTabView extends BorderPane {
             String path = selectedItem.getRelativeDisplayPath();
             courseManager.deleteItem(selectedItem);
             selectedItem = null;
+            setDirty(false);
             refreshItems();
             publishStatus("Deleted " + path);
         } catch (IOException ex) {
@@ -489,23 +504,52 @@ public class CourseTabView extends BorderPane {
         if (selectedCourse == null || files == null || files.isEmpty()) {
             return;
         }
-        CourseItem lastImported = null;
-        int importedCount = 0;
+        Course targetCourse = selectedCourse;
+        CourseSection targetSection = selectedSection;
+        List<Path> sourcePaths = new ArrayList<>();
         for (File file : files) {
-            try {
-                lastImported = courseManager.importExternalFile(selectedCourse, selectedSection, file.toPath());
-                importedCount++;
-            } catch (IllegalArgumentException | IOException ex) {
-                publishStatus("Could not import " + file.getName() + ": " + ex.getMessage());
-            }
+            sourcePaths.add(file.toPath());
         }
-        if (importedCount > 0) {
-            refreshItems();
-            if (lastImported != null) {
-                itemListView.getSelectionModel().select(lastImported);
+        publishStatus("Importing " + sourcePaths.size() + " file(s)...");
+
+        Task<ImportBatchResult> task = new Task<>() {
+            @Override
+            protected ImportBatchResult call() {
+                CourseItem lastImported = null;
+                int importedCount = 0;
+                List<String> errors = new ArrayList<>();
+                for (Path source : sourcePaths) {
+                    try {
+                        lastImported = courseManager.importExternalFile(targetCourse, targetSection, source);
+                        importedCount++;
+                    } catch (IllegalArgumentException | IOException ex) {
+                        errors.add(source.getFileName() + " (" + ex.getMessage() + ")");
+                    }
+                }
+                return new ImportBatchResult(importedCount, lastImported, errors);
             }
-            publishStatus("Stored " + importedCount + " file(s) in " + selectedCourse.getDisplayName() + " / " + selectedSection.getLabel());
-        }
+        };
+
+        task.setOnSucceeded(ev -> {
+            ImportBatchResult result = task.getValue();
+            if (result.importedCount > 0 && targetCourse.equals(selectedCourse) && targetSection == selectedSection) {
+                refreshItems();
+                if (result.lastImported != null) {
+                    itemListView.getSelectionModel().select(result.lastImported);
+                }
+            }
+            if (result.errors.isEmpty()) {
+                publishStatus("Stored " + result.importedCount + " file(s) in "
+                        + targetCourse.getDisplayName() + " / " + targetSection.getLabel());
+            } else if (result.importedCount > 0) {
+                publishStatus("Stored " + result.importedCount + " file(s); skipped "
+                        + result.errors.size() + ": " + String.join(", ", result.errors));
+            } else {
+                publishStatus("Could not import: " + String.join(", ", result.errors));
+            }
+        });
+        task.setOnFailed(ev -> publishStatus("Import failed."));
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     private void handleOpenExternalFile() {
@@ -532,15 +576,15 @@ public class CourseTabView extends BorderPane {
             try {
                 Desktop.getDesktop().open(target.toFile());
             } catch (IOException ex) {
-                javafx.application.Platform.runLater(() ->
+                Platform.runLater(() ->
                         publishStatus("Could not open " + target.getFileName() + ": " + ex.getMessage()));
             }
         });
     }
 
     private void loadItemIntoEditor(CourseItem item) {
-        if (dirty && selectedItem != null && selectedItem.isMarkdown() && !selectedItem.equals(item)) {
-            handleSaveItem();
+        if (selectedItem != null && !selectedItem.equals(item)) {
+            flushPendingEdits();
         }
         loadingEditor = true;
         try {
@@ -560,7 +604,7 @@ public class CourseTabView extends BorderPane {
                 editor.setText("Stored locally at:\n"
                         + item.getFilePath().toAbsolutePath() + "\n"
                         + "Size: " + kb + " KB\n\n"
-                        + "Click 'Open File' above (or double-click the file in the list) to open this PowerPoint/PDF in your default application,\n"
+                        + "Click 'Open File' above (or double-click the file in the list) to open this file in your default application,\n"
                         + "or click 'Open Folder' to view it in Windows Explorer.");
                 editor.setDisable(true);
                 saveButton.setDisable(true);
@@ -600,9 +644,7 @@ public class CourseTabView extends BorderPane {
         if (selectedCourse == null) {
             return;
         }
-        if (dirty && selectedItem != null) {
-            handleSaveItem();
-        }
+        flushPendingEdits();
         Course targetCourse = selectedCourse;
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Course Study Zip");
@@ -633,9 +675,7 @@ public class CourseTabView extends BorderPane {
     }
 
     public void exportAllCourses() {
-        if (dirty && selectedItem != null) {
-            handleSaveItem();
-        }
+        flushPendingEdits();
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export All Courses Study Zip");
         chooser.setInitialFileName("all-courses-study.zip");
@@ -674,6 +714,18 @@ public class CourseTabView extends BorderPane {
     private void notifyStateChanged() {
         if (onStateChanged != null) {
             onStateChanged.run();
+        }
+    }
+
+    private static class ImportBatchResult {
+        final int importedCount;
+        final CourseItem lastImported;
+        final List<String> errors;
+
+        ImportBatchResult(int importedCount, CourseItem lastImported, List<String> errors) {
+            this.importedCount = importedCount;
+            this.lastImported = lastImported;
+            this.errors = errors;
         }
     }
 }

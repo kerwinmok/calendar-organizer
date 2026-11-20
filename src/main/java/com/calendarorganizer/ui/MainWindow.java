@@ -281,6 +281,10 @@ public class MainWindow extends BorderPane {
         dialog.showAndWait();
     }
 
+    public void flushPendingEdits() {
+        courseTabView.flushPendingEdits();
+    }
+
     public void applyTheme(UiTheme theme) {
         this.activeTheme = theme;
         for (UiTheme candidate : UiTheme.values()) {

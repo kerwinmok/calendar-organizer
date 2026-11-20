@@ -83,7 +83,13 @@ public class CourseManager {
     public CourseItem importExternalFile(Course course,
                                          CourseSection section,
                                          Path sourceFile) throws IOException {
-        if (sourceFile == null || !Files.isRegularFile(sourceFile)) {
+        if (sourceFile == null || !Files.exists(sourceFile)) {
+            throw new IllegalArgumentException("Source file does not exist");
+        }
+        if (Files.isDirectory(sourceFile)) {
+            throw new IllegalArgumentException("Folders cannot be imported directly; drop files instead");
+        }
+        if (!Files.isRegularFile(sourceFile)) {
             throw new IllegalArgumentException("Source file does not exist");
         }
         Path sectionDir = course.getDirectory().resolve(section.getFolderName());
@@ -221,7 +227,7 @@ public class CourseManager {
     }
 
     private int compareNatural(String a, String b) {
-        //compares embedded numeric sequences by integer value
+        //compares embedded numeric sequences without integer overflow
         int i = 0;
         int j = 0;
         while (i < a.length() && j < b.length()) {
@@ -236,11 +242,27 @@ public class CourseManager {
                 while (jEnd < b.length() && Character.isDigit(b.charAt(jEnd))) {
                     jEnd++;
                 }
-                long na = Long.parseLong(a.substring(i, iEnd));
-                long nb = Long.parseLong(b.substring(j, jEnd));
-                int numCmp = Long.compare(na, nb);
-                if (numCmp != 0) {
-                    return numCmp;
+                int iNonZero = i;
+                while (iNonZero < iEnd && a.charAt(iNonZero) == '0') {
+                    iNonZero++;
+                }
+                int jNonZero = j;
+                while (jNonZero < jEnd && b.charAt(jNonZero) == '0') {
+                    jNonZero++;
+                }
+                int lenCmp = Integer.compare(iEnd - iNonZero, jEnd - jNonZero);
+                if (lenCmp != 0) {
+                    return lenCmp;
+                }
+                for (int k = 0; k < iEnd - iNonZero; k++) {
+                    int digitCmp = Character.compare(a.charAt(iNonZero + k), b.charAt(jNonZero + k));
+                    if (digitCmp != 0) {
+                        return digitCmp;
+                    }
+                }
+                int rawLenCmp = Integer.compare(iEnd - i, jEnd - j);
+                if (rawLenCmp != 0) {
+                    return rawLenCmp;
                 }
                 i = iEnd;
                 j = jEnd;

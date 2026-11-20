@@ -34,6 +34,7 @@ public class MainApp extends Application {
 
         stage.setTitle("Calendar Organizer");
         stage.setScene(scene);
+        stage.setOnCloseRequest(e -> root.flushPendingEdits());
         stage.show();
     }
 
