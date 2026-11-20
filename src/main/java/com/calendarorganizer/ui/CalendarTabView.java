@@ -59,10 +59,12 @@ public class CalendarTabView extends BorderPane {
     private final Label selectedTitleLabel = new Label("None selected");
     private final Label selectedTimeLabel = new Label("");
     private final Label selectedMetaLabel = new Label("");
+    private final Button editEventButton = new Button("Edit Event");
     private final Button deleteEventButton = new Button("Delete Event");
 
     private LocalDate currentWeekStart;
     private CalendarEvent selectedEvent;
+    private UiTheme activeTheme = UiTheme.CHARCOAL;
     private boolean inspectorVisible = true;
     private String lastStatus = "Ready.";
     private Consumer<String> onStatusChanged;
@@ -73,6 +75,9 @@ public class CalendarTabView extends BorderPane {
         this.currentWeekStart = service.weekStartOf(LocalDate.now());
         this.weekGridView = new WeekGridView();
         this.weekGridView.setOnEventSelected(this::onEventClicked);
+        this.weekGridView.setOnEventEditRequested(this::handleEditEventOrRule);
+        this.weekGridView.setOnEventTimesChanged(this::handleDragUpdateEvent);
+        this.weekGridView.setOnSlotCreateRequested(this::openNewEventDialog);
         this.inspectorScroll = buildInspector();
 
         setCenter(weekGridView);
@@ -103,8 +108,26 @@ public class CalendarTabView extends BorderPane {
                 }
             }
         });
+        rulesList.setOnMouseClicked(ev -> {
+            if (ev.getClickCount() == 2) {
+                RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
+                if (rule != null) {
+                    openEditRuleDialog(rule);
+                }
+            }
+        });
+        Button editRuleBtn = new Button("Edit Rule");
+        editRuleBtn.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(editRuleBtn, Priority.ALWAYS);
+        editRuleBtn.setOnAction(e -> {
+            RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
+            if (rule != null) {
+                openEditRuleDialog(rule);
+            }
+        });
         Button deleteRuleBtn = new Button("Delete Rule");
         deleteRuleBtn.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(deleteRuleBtn, Priority.ALWAYS);
         deleteRuleBtn.setOnAction(e -> {
             RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
             if (rule != null) {
@@ -113,7 +136,8 @@ public class CalendarTabView extends BorderPane {
                 publishStatus("Deleted rule: " + rule.getTitle());
             }
         });
-        VBox rulesBox = new VBox(6, rulesList, deleteRuleBtn);
+        HBox ruleActions = new HBox(6, editRuleBtn, deleteRuleBtn);
+        VBox rulesBox = new VBox(6, rulesList, ruleActions);
         TitledPane rulesPane = new TitledPane("Recurring Rules", rulesBox);
         rulesPane.setExpanded(true);
 
@@ -150,8 +174,17 @@ public class CalendarTabView extends BorderPane {
         selectedTimeLabel.setWrapText(true);
         selectedMetaLabel.getStyleClass().add("dim-label");
         selectedMetaLabel.setWrapText(true);
+        editEventButton.setDisable(true);
+        editEventButton.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(editEventButton, Priority.ALWAYS);
+        editEventButton.setOnAction(e -> {
+            if (selectedEvent != null) {
+                handleEditEventOrRule(selectedEvent);
+            }
+        });
         deleteEventButton.setDisable(true);
         deleteEventButton.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(deleteEventButton, Priority.ALWAYS);
         deleteEventButton.setOnAction(e -> {
             if (selectedEvent != null && selectedEvent.getId() > 0) {
                 service.deleteEvent(selectedEvent.getId());
@@ -160,7 +193,8 @@ public class CalendarTabView extends BorderPane {
                 publishStatus("Deleted selected event.");
             }
         });
-        VBox selectedBox = new VBox(6, selectedTitleLabel, selectedTimeLabel, selectedMetaLabel, deleteEventButton);
+        HBox selectedActions = new HBox(6, editEventButton, deleteEventButton);
+        VBox selectedBox = new VBox(6, selectedTitleLabel, selectedTimeLabel, selectedMetaLabel, selectedActions);
         TitledPane selectedPane = new TitledPane("Selected Event", selectedBox);
         selectedPane.setExpanded(true);
 
@@ -183,6 +217,99 @@ public class CalendarTabView extends BorderPane {
 
     public void setOnDataChanged(Runnable listener) {
         this.onDataChanged = listener;
+    }
+
+    public void setActiveTheme(UiTheme theme) {
+        this.activeTheme = theme;
+    }
+
+    public void openNewEventDialogDefault() {
+        LocalDate date = LocalDate.now();
+        if (date.isBefore(currentWeekStart) || date.isAfter(currentWeekStart.plusDays(6))) {
+            date = currentWeekStart;
+        }
+        openNewEventDialog(date, LocalTime.of(9, 0), LocalTime.of(10, 0));
+    }
+
+    public void openNewEventDialog(LocalDate date, LocalTime start, LocalTime end) {
+        Optional<CalendarEvent> created = EventDialog.showEventDialog(
+                getScene().getWindow(), activeTheme, null, date, start, end
+        );
+        if (created.isPresent()) {
+            CalendarEvent saved = service.saveManualEvent(created.get());
+            selectedEvent = saved;
+            refreshView();
+            publishStatus("Added event: " + saved.getTitle() + " (" + saved.getStartTime().format(TIME_FMT)
+                    + "-" + saved.getEndTime().format(TIME_FMT) + ")");
+        }
+    }
+
+    private void handleEditEventOrRule(CalendarEvent event) {
+        if (event.getSource() == EventSource.RECURRING) {
+            RecurringRule matchingRule = findRuleForOccurrence(event);
+            if (matchingRule != null) {
+                openEditRuleDialog(matchingRule);
+                return;
+            }
+        }
+        if (event.getId() <= 0) {
+            return;
+        }
+        Optional<CalendarEvent> updated = EventDialog.showEventDialog(
+                getScene().getWindow(),
+                activeTheme,
+                event,
+                event.getStartTime().toLocalDate(),
+                event.getStartTime().toLocalTime(),
+                event.getEndTime().toLocalTime()
+        );
+        if (updated.isPresent()) {
+            CalendarEvent saved = updated.get();
+            service.updateEvent(saved);
+            selectedEvent = saved;
+            refreshView();
+            publishStatus("Updated event: " + saved.getTitle());
+        }
+    }
+
+    private void openEditRuleDialog(RecurringRule rule) {
+        Optional<RecurringRule> updated = EventDialog.showRecurringRuleDialog(
+                getScene().getWindow(), activeTheme, rule
+        );
+        if (updated.isPresent()) {
+            RecurringRule saved = updated.get();
+            service.updateRecurringRule(saved);
+            refreshView();
+            publishStatus("Updated recurring rule: " + saved.getTitle());
+        }
+    }
+
+    private void handleDragUpdateEvent(CalendarEvent updated) {
+        service.updateEvent(updated);
+        selectedEvent = updated;
+        refreshView();
+        publishStatus("Moved " + updated.getTitle() + " to "
+                + updated.getStartTime().format(TIME_FMT) + "-" + updated.getEndTime().format(TIME_FMT));
+    }
+
+    private RecurringRule findRuleForOccurrence(CalendarEvent occurrence) {
+        String uid = occurrence.getUid();
+        if (uid != null && uid.startsWith("rule-")) {
+            int secondDash = uid.indexOf('-', 5);
+            if (secondDash > 5) {
+                try {
+                    long ruleId = Long.parseLong(uid.substring(5, secondDash));
+                    for (RecurringRule rule : service.findAllRecurringRules()) {
+                        if (rule.getId() == ruleId) {
+                            return rule;
+                        }
+                    }
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     public void toggleInspector() {
@@ -421,6 +548,7 @@ public class CalendarTabView extends BorderPane {
             selectedTitleLabel.setText("None selected");
             selectedTimeLabel.setText("");
             selectedMetaLabel.setText("");
+            editEventButton.setDisable(true);
             deleteEventButton.setDisable(true);
             return;
         }
@@ -429,11 +557,14 @@ public class CalendarTabView extends BorderPane {
                 + selectedEvent.getStartTime().format(TIME_FMT) + " -> "
                 + selectedEvent.getEndTime().format(TIME_FMT));
         if (selectedEvent.getSource() == EventSource.RECURRING) {
-            selectedMetaLabel.setText("Recurring occurrence (delete via Recurring Rules)");
+            selectedMetaLabel.setText("Recurring occurrence (Edit Rule or delete via Recurring Rules)");
+            editEventButton.setDisable(false);
             deleteEventButton.setDisable(true);
         } else {
             selectedMetaLabel.setText(selectedEvent.getCategory().name() + " / " + selectedEvent.getSource().name());
-            deleteEventButton.setDisable(selectedEvent.getId() <= 0);
+            boolean hasId = selectedEvent.getId() > 0;
+            editEventButton.setDisable(!hasId);
+            deleteEventButton.setDisable(!hasId);
         }
     }
 

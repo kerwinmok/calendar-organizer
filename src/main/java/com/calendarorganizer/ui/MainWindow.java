@@ -150,6 +150,8 @@ public class MainWindow extends BorderPane {
     }
 
     private HBox buildCalendarActionsBox() {
+        Button newEventBtn = new Button("+ Event");
+        newEventBtn.setOnAction(e -> calendarTabView.openNewEventDialogDefault());
         autoScheduleBtn.setOnAction(e -> calendarTabView.rescheduleCurrentWeek());
 
         MenuItem importFileItem = new MenuItem("Import .ics File...");
@@ -160,7 +162,7 @@ public class MainWindow extends BorderPane {
         exportIcsItem.setOnAction(e -> calendarTabView.exportIcsFile());
         icsMenuBtn.getItems().setAll(importFileItem, pasteIcsItem, exportIcsItem);
 
-        HBox box = new HBox(6, autoScheduleBtn, icsMenuBtn);
+        HBox box = new HBox(6, newEventBtn, autoScheduleBtn, icsMenuBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
         return box;
     }
@@ -284,6 +286,7 @@ public class MainWindow extends BorderPane {
             getStyleClass().remove(candidate.getStyleClass());
         }
         getStyleClass().add(theme.getStyleClass());
+        calendarTabView.setActiveTheme(theme);
         courseTabView.setActiveTheme(theme);
     }
 
