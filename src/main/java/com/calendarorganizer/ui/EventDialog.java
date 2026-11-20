@@ -2,8 +2,9 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
-import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.RecurringRule;
+import javafx.application.Platform;
+import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -23,10 +24,7 @@ import javafx.stage.Window;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
@@ -34,8 +32,6 @@ import java.util.Optional;
 import java.util.Set;
 
 public class EventDialog {
-
-    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
 
     public static Optional<CalendarEvent> showEventDialog(Window owner,
                                                           UiTheme activeTheme,
@@ -59,7 +55,7 @@ public class EventDialog {
         pane.setPrefWidth(420);
 
         TextField titleField = new TextField();
-        titleField.setPromptText("Event title");
+        titleField.setPromptText("Event title (e.g. Study Session)");
         DatePicker datePicker = new DatePicker();
         TextField startField = new TextField();
         startField.setPromptText("HH:mm (e.g. 09:00)");
@@ -72,20 +68,25 @@ public class EventDialog {
         notesArea.setPromptText("Optional notes");
         Label errorLabel = new Label("");
         errorLabel.getStyleClass().add("caution-label");
+        errorLabel.setWrapText(true);
 
         if (existing != null) {
             titleField.setText(existing.getTitle());
             datePicker.setValue(existing.getStartTime().toLocalDate());
-            startField.setText(existing.getStartTime().toLocalTime().format(TIME_FMT));
-            endField.setText(existing.getEndTime().toLocalTime().format(TIME_FMT));
+            startField.setText(existing.getStartTime().toLocalTime().format(EventFormValidator.TIME_DISPLAY_FMT));
+            endField.setText(existing.getEndTime().toLocalTime().format(EventFormValidator.TIME_DISPLAY_FMT));
             categoryBox.setValue(existing.getCategory());
             notesArea.setText(existing.getNotes());
+            Platform.runLater(() -> {
+                titleField.requestFocus();
+                titleField.selectAll();
+            });
         } else {
-            titleField.setText("New Event");
             datePicker.setValue(defaultDate);
-            startField.setText(defaultStart.format(TIME_FMT));
-            endField.setText(defaultEnd.format(TIME_FMT));
+            startField.setText(defaultStart.format(EventFormValidator.TIME_DISPLAY_FMT));
+            endField.setText(defaultEnd.format(EventFormValidator.TIME_DISPLAY_FMT));
             categoryBox.setValue(EventCategory.BUSY);
+            Platform.runLater(titleField::requestFocus);
         }
 
         GridPane grid = new GridPane();
@@ -110,17 +111,30 @@ public class EventDialog {
         content.setPadding(new Insets(10));
         pane.setContent(content);
 
+        final CalendarEvent[] builtHolder = new CalendarEvent[1];
         Button okBtn = (Button) pane.lookupButton(ButtonType.OK);
-        okBtn.addEventFilter(javafx.event.ActionEvent.ACTION, ev -> {
-            CalendarEvent built = tryBuildEvent(existing, titleField, datePicker, startField, endField, categoryBox, notesArea, errorLabel);
-            if (built == null) {
+        okBtn.addEventFilter(ActionEvent.ACTION, ev -> {
+            try {
+                builtHolder[0] = EventFormValidator.buildEvent(
+                        existing,
+                        titleField.getText(),
+                        datePicker.getValue(),
+                        startField.getText(),
+                        endField.getText(),
+                        categoryBox.getValue(),
+                        notesArea.getText()
+                );
+                errorLabel.setText("");
+            } catch (IllegalArgumentException ex) {
+                builtHolder[0] = null;
+                errorLabel.setText(ex.getMessage());
                 ev.consume();
             }
         });
 
         dialog.setResultConverter(btn -> {
             if (btn == ButtonType.OK) {
-                return tryBuildEvent(existing, titleField, datePicker, startField, endField, categoryBox, notesArea, errorLabel);
+                return builtHolder[0];
             }
             return null;
         });
@@ -142,8 +156,8 @@ public class EventDialog {
         pane.setPrefWidth(440);
 
         TextField titleField = new TextField(existing.getTitle());
-        TextField startField = new TextField(existing.getStartTime().format(TIME_FMT));
-        TextField endField = new TextField(existing.getEndTime().format(TIME_FMT));
+        TextField startField = new TextField(existing.getStartTime().format(EventFormValidator.TIME_DISPLAY_FMT));
+        TextField endField = new TextField(existing.getEndTime().format(EventFormValidator.TIME_DISPLAY_FMT));
         ComboBox<EventCategory> categoryBox = new ComboBox<>();
         categoryBox.getItems().setAll(EventCategory.values());
         categoryBox.setValue(existing.getCategory());
@@ -159,6 +173,12 @@ public class EventDialog {
 
         Label errorLabel = new Label("");
         errorLabel.getStyleClass().add("caution-label");
+        errorLabel.setWrapText(true);
+
+        Platform.runLater(() -> {
+            titleField.requestFocus();
+            titleField.selectAll();
+        });
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -179,17 +199,29 @@ public class EventDialog {
         content.setPadding(new Insets(10));
         pane.setContent(content);
 
+        final RecurringRule[] builtHolder = new RecurringRule[1];
         Button okBtn = (Button) pane.lookupButton(ButtonType.OK);
-        okBtn.addEventFilter(javafx.event.ActionEvent.ACTION, ev -> {
-            RecurringRule built = tryBuildRule(existing, titleField, dayChecks, startField, endField, categoryBox, errorLabel);
-            if (built == null) {
+        okBtn.addEventFilter(ActionEvent.ACTION, ev -> {
+            try {
+                builtHolder[0] = EventFormValidator.buildRecurringRule(
+                        existing,
+                        titleField.getText(),
+                        collectSelectedDays(dayChecks),
+                        startField.getText(),
+                        endField.getText(),
+                        categoryBox.getValue()
+                );
+                errorLabel.setText("");
+            } catch (IllegalArgumentException ex) {
+                builtHolder[0] = null;
+                errorLabel.setText(ex.getMessage());
                 ev.consume();
             }
         });
 
         dialog.setResultConverter(btn -> {
             if (btn == ButtonType.OK) {
-                return tryBuildRule(existing, titleField, dayChecks, startField, endField, categoryBox, errorLabel);
+                return builtHolder[0];
             }
             return null;
         });
@@ -197,97 +229,13 @@ public class EventDialog {
         return dialog.showAndWait();
     }
 
-    private static CalendarEvent tryBuildEvent(CalendarEvent existing,
-                                               TextField titleField,
-                                               DatePicker datePicker,
-                                               TextField startField,
-                                               TextField endField,
-                                               ComboBox<EventCategory> categoryBox,
-                                               TextArea notesArea,
-                                               Label errorLabel) {
-        String title = titleField.getText();
-        if (title == null || title.isBlank()) {
-            errorLabel.setText("Title is required.");
-            return null;
-        }
-        LocalDate date = datePicker.getValue();
-        if (date == null) {
-            errorLabel.setText("Date is required.");
-            return null;
-        }
-        LocalTime start;
-        LocalTime end;
-        try {
-            start = LocalTime.parse(startField.getText().trim(), TIME_FMT);
-            end = LocalTime.parse(endField.getText().trim(), TIME_FMT);
-        } catch (DateTimeParseException ex) {
-            errorLabel.setText("Use HH:mm format for start and end times (e.g. 09:00).");
-            return null;
-        }
-        LocalDateTime startDt = date.atTime(start);
-        LocalDate endDay = date;
-        if (!end.isAfter(start)) {
-            endDay = date.plusDays(1);
-        }
-        LocalDateTime endDt = endDay.atTime(end);
-        EventCategory category = categoryBox.getValue();
-        String notes = notesArea.getText();
-
-        if (existing == null) {
-            return new CalendarEvent(0L, null, title.trim(), startDt, endDt, category, EventSource.MANUAL, notes);
-        }
-        return new CalendarEvent(
-                existing.getId(),
-                existing.getUid(),
-                title.trim(),
-                startDt,
-                endDt,
-                category,
-                existing.getSource(),
-                notes
-        );
-    }
-
-    private static RecurringRule tryBuildRule(RecurringRule existing,
-                                              TextField titleField,
-                                              Map<DayOfWeek, CheckBox> dayChecks,
-                                              TextField startField,
-                                              TextField endField,
-                                              ComboBox<EventCategory> categoryBox,
-                                              Label errorLabel) {
-        String title = titleField.getText();
-        if (title == null || title.isBlank()) {
-            errorLabel.setText("Title is required.");
-            return null;
-        }
+    private static Set<DayOfWeek> collectSelectedDays(Map<DayOfWeek, CheckBox> dayChecks) {
         Set<DayOfWeek> days = EnumSet.noneOf(DayOfWeek.class);
         for (Map.Entry<DayOfWeek, CheckBox> entry : dayChecks.entrySet()) {
             if (entry.getValue().isSelected()) {
                 days.add(entry.getKey());
             }
         }
-        if (days.isEmpty()) {
-            errorLabel.setText("Select at least one day of the week.");
-            return null;
-        }
-        LocalTime start;
-        LocalTime end;
-        try {
-            start = LocalTime.parse(startField.getText().trim(), TIME_FMT);
-            end = LocalTime.parse(endField.getText().trim(), TIME_FMT);
-        } catch (DateTimeParseException ex) {
-            errorLabel.setText("Use HH:mm format for start and end times (e.g. 07:00).");
-            return null;
-        }
-        return new RecurringRule(
-                existing.getId(),
-                title.trim(),
-                days,
-                start,
-                end,
-                categoryBox.getValue(),
-                existing.getStartDate(),
-                existing.getEndDate()
-        );
+        return days;
     }
 }
