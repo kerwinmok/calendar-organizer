@@ -40,3 +40,7 @@
 - **Decision**: Package the Windows distribution using `jpackage --type app-image` via `scripts/package-windows.ps1` rather than `--type msi` or `--type exe`.
 - **Reason**: WiX Toolset (`candle`/`light`/`wix`) is not required for `--type app-image`, so any machine with JDK 21 and Maven can immediately produce a runnable `CalendarOrganizer.exe` bundle. Users who install WiX can switch `--type` to `msi` in the script if an installer is desired.
 
+## Default Gemini model
+- **Decision**: Default `GeminiProvider` to `gemini-flash-lite-latest` (configurable via `GEMINI_MODEL`) and skip any `"thought": true` response parts when extracting JSON text.
+- **Reason**: `gemini-2.5-flash` returns HTTP 404 for new API keys on `generativelanguage.googleapis.com/v1beta`, whereas `gemini-flash-lite-latest` responds cleanly and quickly with structured JSON.
+

@@ -32,9 +32,9 @@ The built-in `RuleParser` handles common schedule phrases offline with zero conf
 $env:GEMINI_API_KEY = "your-gemini-api-key"
 mvn javafx:run
 ```
-Optional model override (defaults to `gemini-2.5-flash`):
+Optional model override (defaults to `gemini-flash-lite-latest`):
 ```powershell
-$env:GEMINI_MODEL = "gemini-2.5-flash"
+$env:GEMINI_MODEL = "gemini-flash-lite-latest"
 ```
 
 ### Local Ollama
