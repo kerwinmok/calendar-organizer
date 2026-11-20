@@ -35,7 +35,8 @@
 - **What works**:
   - `scripts/package-windows.ps1` builds and packages `target/dist/CalendarOrganizer/CalendarOrganizer.exe` using JDK 21 `jpackage` with bounded `G1GC` heap flags (`-Xms32m -Xmx256m`).
   - LightCraft-inspired single-chrome UI (`MainWindow`, `SettingsDialog`, `UiTheme` with Charcoal/Midnight/Paper themes), static-grid coalesced `WeekGridView`, SQLite WAL + indexes + compaction (`VACUUM` / `PRAGMA optimize`), and one-click reset of calendar history and settings.
+  - `CalendarGridMath` and `EventFormValidator` back interactive calendar zooming, drag-to-create/move/resize, manual event editing, recurring rule editing, and course PDF/PPTX attachment storage.
   - Both `mvn javafx:run` and the packaged `CalendarOrganizer.exe` launch on Windows cleanly.
-  - All 36 JUnit 5 tests pass.
+  - All 48 JUnit 5 tests pass.
 - **What's next**:
   - Ready for everyday use; set `$env:GEMINI_API_KEY` or run local Ollama optionally for LLM sentence parsing.

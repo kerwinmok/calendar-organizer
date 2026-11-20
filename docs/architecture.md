@@ -37,8 +37,8 @@
 - `com.calendarorganizer.ui`
   - `UiTheme`: `CHARCOAL` (default dark), `MIDNIGHT` (near-black dark), and `PAPER` (light) theme definitions.
   - `MainWindow`: unified LightCraft-inspired chrome with top command bar, bottom status/navigation bar, collapsible panels, and `Calendar`/`Courses` mode switching.
-  - `CalendarTabView`, `WeekGridView`, `EventDialog`: 7-day x 24-hour calendar canvas with `Ctrl + Scroll` zooming, static hour gridlines, coalesced resize relayout, smooth wheel scrolling, current-time indicator, drag-to-create on empty slots, drag-to-move/resize on event cards, manual event and recurring-rule editing dialogs, `.ics` background tasks, and collapsible right inspector.
-  - `CourseTabView`: three-pane course list with top-bar filtering, segmented section switch (`Lectures`, `Notes`, `Coursework`), markdown editor, and background `.zip` exports.
+  - `CalendarTabView`, `WeekGridView`, `CalendarGridMath`, `EventDialog`, `EventFormValidator`: 7-day x 24-hour calendar canvas with `Ctrl + Scroll` zooming, static hour gridlines, coalesced resize relayout, smooth wheel scrolling, current-time indicator, drag-to-create on empty slots, drag-to-move/resize on event cards, manual event and recurring-rule editing dialogs with form validation, `.ics` background tasks, and collapsible right inspector.
+  - `CourseTabView`: three-pane course list with top-bar filtering, segmented section switch (`Lectures`, `Notes`, `Coursework`), markdown editor with automatic flush on navigation/close, drag-and-drop and file-chooser attachment imports in the background, desktop open/folder navigation, and background `.zip` exports.
   - `SettingsDialog`: theme switcher, storage and JVM memory readout, `Clear Past Events`, `Clear Scheduled Sessions`, `Optimize & Compact Database`, and `Reset All Calendar History & Settings`.
 
 ## Data Flow
