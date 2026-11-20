@@ -1,5 +1,6 @@
 package com.calendarorganizer;
 
+import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.AppPaths;
@@ -22,8 +23,9 @@ public class MainApp extends Application {
         CalendarRepository repository = new CalendarRepository(dbManager);
         CalendarService calendarService = new CalendarService(repository);
         CourseManager courseManager = new CourseManager(paths.getCoursesDir());
+        CourseExporter courseExporter = new CourseExporter(courseManager);
 
-        MainWindow root = new MainWindow(calendarService, courseManager);
+        MainWindow root = new MainWindow(calendarService, courseManager, courseExporter);
         Scene scene = new Scene(root, 1240, 780);
         URL cssUrl = MainApp.class.getResource("/styles.css");
         if (cssUrl != null) {

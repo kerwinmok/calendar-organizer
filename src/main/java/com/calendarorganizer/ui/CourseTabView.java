@@ -1,6 +1,7 @@
 package com.calendarorganizer.ui;
 
 import com.calendarorganizer.course.Course;
+import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
@@ -25,7 +26,9 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +36,7 @@ import java.util.Optional;
 public class CourseTabView extends BorderPane {
 
     private final CourseManager courseManager;
+    private final CourseExporter courseExporter;
 
     private final ListView<Course> courseListView = new ListView<>();
     private final TabPane sectionTabs = new TabPane();
@@ -55,8 +59,9 @@ public class CourseTabView extends BorderPane {
     private boolean dirty;
     private boolean loadingEditor;
 
-    public CourseTabView(CourseManager courseManager) {
+    public CourseTabView(CourseManager courseManager, CourseExporter courseExporter) {
         this.courseManager = courseManager;
+        this.courseExporter = courseExporter;
 
         SplitPane splitPane = new SplitPane(
                 buildCoursesPane(),
@@ -104,7 +109,9 @@ public class CourseTabView extends BorderPane {
 
         exportCourseButton.setMaxWidth(Double.MAX_VALUE);
         exportCourseButton.setDisable(true);
+        exportCourseButton.setOnAction(e -> handleExportSingleCourse());
         exportAllButton.setMaxWidth(Double.MAX_VALUE);
+        exportAllButton.setOnAction(e -> handleExportAllCourses());
 
         VBox pane = new VBox(8, heading, courseListView, newCourseBtn, deleteCourseButton,
                 new Separator(), exportCourseButton, exportAllButton);
@@ -377,6 +384,49 @@ public class CourseTabView extends BorderPane {
             dirtyIndicator.setText("* Unsaved");
         } else {
             dirtyIndicator.setText("");
+        }
+    }
+
+    private void handleExportSingleCourse() {
+        if (selectedCourse == null) {
+            return;
+        }
+        if (dirty && selectedItem != null) {
+            handleSaveItem();
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export Course Study Zip");
+        chooser.setInitialFileName(selectedCourse.getFolderName() + "-study.zip");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("ZIP archive (*.zip)", "*.zip"));
+        File file = chooser.showSaveDialog(getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        try {
+            courseExporter.exportCourse(selectedCourse, file.toPath());
+            statusLabel.setText("Exported " + selectedCourse.getDisplayName() + " to " + file.getAbsolutePath());
+        } catch (IOException ex) {
+            statusLabel.setText("Export failed: " + ex.getMessage());
+        }
+    }
+
+    private void handleExportAllCourses() {
+        if (dirty && selectedItem != null) {
+            handleSaveItem();
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export All Courses Study Zip");
+        chooser.setInitialFileName("all-courses-study.zip");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("ZIP archive (*.zip)", "*.zip"));
+        File file = chooser.showSaveDialog(getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        try {
+            courseExporter.exportAllCourses(file.toPath());
+            statusLabel.setText("Exported all courses to " + file.getAbsolutePath());
+        } catch (IOException ex) {
+            statusLabel.setText("Export failed: " + ex.getMessage());
         }
     }
 }
