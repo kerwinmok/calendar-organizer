@@ -15,11 +15,20 @@ try {
     }
     Copy-Item -Path $jarPath -Destination $inputDir -Force
 
-    $distDir = Join-Path $projectRoot "target\dist"
-    if (Test-Path $distDir) {
-        Remove-Item -Recurse -Force $distDir
+    $iconPath = Join-Path $projectRoot "packaging\windows\app-icon.ico"
+    if (-not (Test-Path $iconPath)) {
+        throw "Expected icon not found at $iconPath"
     }
-    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+    $launcherSource = Join-Path $projectRoot "packaging\windows\SingleFileLauncher.cs"
+    if (-not (Test-Path $launcherSource)) {
+        throw "Expected launcher source not found at $launcherSource"
+    }
+
+    $stageDir = Join-Path $projectRoot "target\jpackage-stage"
+    if (Test-Path $stageDir) {
+        Remove-Item -Recurse -Force $stageDir
+    }
+    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
     & jpackage `
         --type app-image `
@@ -28,6 +37,7 @@ try {
         --main-jar "calendar-organizer-1.0.0.jar" `
         --main-class "com.calendarorganizer.Launcher" `
         --app-version "1.0.0" `
+        --icon $iconPath `
         --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,jdk.crypto.ec,jdk.unsupported" `
         --java-options "-Xms32m" `
         --java-options "-Xmx256m" `
@@ -35,13 +45,89 @@ try {
         --java-options "-XX:MaxGCPauseMillis=20" `
         --java-options "-XX:MinHeapFreeRatio=15" `
         --java-options "-XX:MaxHeapFreeRatio=30" `
-        --dest $distDir
+        --dest $stageDir
 
     if ($LASTEXITCODE -ne 0) {
         throw "jpackage failed"
     }
 
-    Write-Output "Packaged app image at: $(Join-Path $distDir 'CalendarOrganizer\CalendarOrganizer.exe')"
+    $stageAppDir = Join-Path $stageDir "CalendarOrganizer"
+    $payloadZip = Join-Path $stageDir "payload.zip"
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $stageAppDir,
+        $payloadZip,
+        [System.IO.Compression.CompressionLevel]::Optimal,
+        $false
+    )
+
+    $hashHex = (Get-FileHash -Path $payloadZip -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stamp = $hashHex.Substring(0, 16)
+
+    $cscExe = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+    if (-not (Test-Path $cscExe)) {
+        throw ".NET Framework csc.exe not found at $cscExe"
+    }
+
+    $stubExe = Join-Path $stageDir "launcher-stub.exe"
+    & $cscExe `
+        /nologo `
+        /target:winexe `
+        /platform:x64 `
+        /optimize+ `
+        "/win32icon:$iconPath" `
+        /r:System.IO.Compression.dll `
+        /r:System.IO.Compression.FileSystem.dll `
+        /r:System.Windows.Forms.dll `
+        /r:System.Drawing.dll `
+        "/out:$stubExe" `
+        $launcherSource
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "csc launcher compilation failed"
+    }
+
+    $distDir = Join-Path $projectRoot "target\dist"
+    if (Test-Path $distDir) {
+        Remove-Item -Recurse -Force $distDir
+    }
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+    $finalExe = Join-Path $distDir "CalendarOrganizer.exe"
+    $stubLength = (Get-Item $stubExe).Length
+    $payloadLength = (Get-Item $payloadZip).Length
+
+    $outStream = [System.IO.File]::Create($finalExe)
+    try {
+        $stubStream = [System.IO.File]::OpenRead($stubExe)
+        try {
+            $stubStream.CopyTo($outStream)
+        } finally {
+            $stubStream.Dispose()
+        }
+
+        $zipStream = [System.IO.File]::OpenRead($payloadZip)
+        try {
+            $zipStream.CopyTo($outStream)
+        } finally {
+            $zipStream.Dispose()
+        }
+
+        $writer = New-Object System.IO.BinaryWriter($outStream, [System.Text.Encoding]::ASCII, $true)
+        try {
+            $writer.Write([System.Text.Encoding]::ASCII.GetBytes($stamp))
+            $writer.Write([Int64]$stubLength)
+            $writer.Write([Int64]$payloadLength)
+            $writer.Write([System.Text.Encoding]::ASCII.GetBytes("CALORG01"))
+        } finally {
+            $writer.Dispose()
+        }
+    } finally {
+        $outStream.Dispose()
+    }
+
+    $sizeMb = [Math]::Round(((Get-Item $finalExe).Length / 1MB), 1)
+    Write-Output "Packaged single-file executable at: $finalExe ($sizeMb MB)"
 } finally {
     Pop-Location
 }
