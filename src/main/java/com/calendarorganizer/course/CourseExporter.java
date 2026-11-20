@@ -41,7 +41,9 @@ public class CourseExporter {
                 combined.append("# ").append(course.getDisplayName()).append("\n\n");
 
                 for (CourseSection section : CourseSection.values()) {
-                    List<CourseItem> items = courseManager.listItems(course, section);
+                    List<CourseItem> items = courseManager.listItems(course, section).stream()
+                            .filter(CourseItem::isMarkdown)
+                            .toList();
                     if (items.isEmpty()) {
                         continue;
                     }

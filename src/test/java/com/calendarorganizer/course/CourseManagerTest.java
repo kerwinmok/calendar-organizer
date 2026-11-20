@@ -64,6 +64,28 @@ class CourseManagerTest {
     }
 
     @Test
+    void importsExternalPdfAndPowerPointFilesIntoCourseSection(@TempDir Path tempDir) throws IOException {
+        Course cmpt = manager.createCourse("CMPT 201");
+        Path samplePdf = tempDir.resolve("Week 01 Slides.pdf");
+        Path samplePptx = tempDir.resolve("Lecture_02.pptx");
+        Files.writeString(samplePdf, "%PDF-1.7 sample");
+        Files.writeString(samplePptx, "PK-pptx-sample");
+
+        CourseItem pdfItem = manager.importExternalFile(cmpt, CourseSection.LECTURES, samplePdf);
+        CourseItem pptxItem = manager.importExternalFile(cmpt, CourseSection.LECTURES, samplePptx);
+
+        assertFalse(pdfItem.isMarkdown());
+        assertFalse(pptxItem.isMarkdown());
+        assertEquals("Week-01-Slides.pdf", pdfItem.getFileName());
+        assertEquals("Lecture_02.pptx", pptxItem.getFileName());
+        assertTrue(Files.exists(coursesRoot.resolve("CMPT-201/lectures/Week-01-Slides.pdf")));
+        assertTrue(Files.exists(coursesRoot.resolve("CMPT-201/lectures/Lecture_02.pptx")));
+
+        List<CourseItem> items = manager.listItems(cmpt, CourseSection.LECTURES);
+        assertEquals(2, items.size());
+    }
+
+    @Test
     void rejectsPathTraversalInCourseAndItemNames() throws IOException {
         assertThrows(IllegalArgumentException.class, () -> manager.createCourse("../escape"));
         assertThrows(IllegalArgumentException.class, () -> manager.createCourse("a/b"));

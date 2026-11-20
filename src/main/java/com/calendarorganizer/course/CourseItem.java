@@ -1,6 +1,7 @@
 package com.calendarorganizer.course;
 
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Objects;
 
 public class CourseItem {
@@ -23,6 +24,10 @@ public class CourseItem {
 
     public Path getFilePath() {
         return filePath;
+    }
+
+    public boolean isMarkdown() {
+        return fileName.toLowerCase(Locale.ROOT).endsWith(".md");
     }
 
     public String getRelativeDisplayPath() {

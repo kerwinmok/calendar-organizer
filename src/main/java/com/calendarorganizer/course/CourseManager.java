@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -69,7 +70,7 @@ public class CourseManager {
         try (Stream<Path> stream = Files.list(sectionDir)) {
             List<Path> files = stream
                     .filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md"))
+                    .filter(p -> !p.getFileName().toString().startsWith("."))
                     .toList();
             for (Path file : files) {
                 items.add(new CourseItem(course, section, file.getFileName().toString(), file));
@@ -77,6 +78,22 @@ public class CourseManager {
         }
         items.sort((a, b) -> compareNatural(a.getFileName(), b.getFileName()));
         return items;
+    }
+
+    public CourseItem importExternalFile(Course course,
+                                         CourseSection section,
+                                         Path sourceFile) throws IOException {
+        if (sourceFile == null || !Files.isRegularFile(sourceFile)) {
+            throw new IllegalArgumentException("Source file does not exist");
+        }
+        Path sectionDir = course.getDirectory().resolve(section.getFolderName());
+        Files.createDirectories(sectionDir);
+
+        String rawName = sourceFile.getFileName().toString();
+        String safeName = sanitizeAttachmentFileName(rawName);
+        Path target = resolveSafeChild(sectionDir, safeName);
+        Files.copy(sourceFile, target, StandardCopyOption.REPLACE_EXISTING);
+        return new CourseItem(course, section, safeName, target);
     }
 
     public CourseItem createItem(Course course,
@@ -154,6 +171,16 @@ public class CourseManager {
             throw new IllegalArgumentException("File name must contain letters or digits");
         }
         return cleaned + ".md";
+    }
+
+    private String sanitizeAttachmentFileName(String rawFileName) {
+        validateRawSegment(rawFileName);
+        String cleaned = rawFileName.trim().replaceAll("[^A-Za-z0-9._\\-\\s]", "");
+        cleaned = cleaned.trim().replaceAll("\\s+", "-").replaceAll("-{2,}", "-");
+        if (cleaned.isEmpty() || cleaned.startsWith(".")) {
+            throw new IllegalArgumentException("Invalid attachment file name");
+        }
+        return cleaned;
     }
 
     private void validateRawSegment(String raw) {

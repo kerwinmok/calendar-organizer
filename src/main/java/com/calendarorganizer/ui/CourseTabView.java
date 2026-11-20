@@ -18,19 +18,24 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputDialog;
+import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
+import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -52,8 +57,11 @@ public class CourseTabView extends BorderPane {
     private final Label dirtyIndicator = new Label("");
     private final TextArea editor = new TextArea();
     private final Button saveButton = new Button("Save");
-    private final Button newItemButton = new Button("+ New Markdown");
-    private final Button deleteItemButton = new Button("Delete File");
+    private final Button openFileButton = new Button("Open File");
+    private final Button openFolderButton = new Button("Open Folder");
+    private final Button newItemButton = new Button("+ New Note");
+    private final Button importFileButton = new Button("Import File");
+    private final Button deleteItemButton = new Button("Delete");
     private final Button deleteCourseButton = new Button("Delete Course");
 
     private List<Course> allCourses = List.of();
@@ -95,12 +103,16 @@ public class CourseTabView extends BorderPane {
                 courseHeading.setText(newVal.getDisplayName());
                 deleteCourseButton.setDisable(false);
                 newItemButton.setDisable(false);
+                importFileButton.setDisable(false);
+                openFolderButton.setDisable(false);
                 refreshItems();
             } else {
                 selectedCourse = null;
                 courseHeading.setText("Select a course");
                 deleteCourseButton.setDisable(true);
                 newItemButton.setDisable(true);
+                importFileButton.setDisable(true);
+                openFolderButton.setDisable(true);
                 itemListView.getItems().clear();
                 clearEditor();
             }
@@ -147,28 +159,63 @@ public class CourseTabView extends BorderPane {
                 clearEditor();
             }
         });
+        itemListView.setOnMouseClicked(ev -> {
+            if (ev.getClickCount() == 2 && selectedItem != null && !selectedItem.isMarkdown()) {
+                handleOpenExternalFile();
+            }
+        });
+
+        Label dropHint = new Label("Drag & drop PDF, PPTX, or MD files here");
+        dropHint.getStyleClass().add("dim-label");
 
         newItemButton.setDisable(true);
         newItemButton.setOnAction(e -> handleCreateItem());
+        importFileButton.setDisable(true);
+        importFileButton.setOnAction(e -> handleImportFilesDialog());
         deleteItemButton.setDisable(true);
         deleteItemButton.setOnAction(e -> handleDeleteItem());
 
-        HBox buttons = new HBox(8, newItemButton, deleteItemButton);
-        VBox pane = new VBox(8, courseHeading, segmentGroup, itemListView, buttons);
+        HBox buttons = new HBox(6, newItemButton, importFileButton, deleteItemButton);
+        VBox pane = new VBox(8, courseHeading, segmentGroup, itemListView, dropHint, buttons);
         pane.getStyleClass().add("lc-inset-pane");
         pane.setPadding(new Insets(10));
-        pane.setMinWidth(220);
+        pane.setMinWidth(235);
+        installFileDragAndDrop(pane);
         return pane;
+    }
+
+    private void installFileDragAndDrop(VBox targetPane) {
+        targetPane.setOnDragOver(event -> {
+            Dragboard db = event.getDragboard();
+            if (selectedCourse != null && db.hasFiles()) {
+                event.acceptTransferModes(TransferMode.COPY);
+            }
+            event.consume();
+        });
+        targetPane.setOnDragDropped(event -> {
+            Dragboard db = event.getDragboard();
+            boolean success = false;
+            if (selectedCourse != null && db.hasFiles()) {
+                importFilesList(db.getFiles());
+                success = true;
+            }
+            event.setDropCompleted(success);
+            event.consume();
+        });
     }
 
     private VBox buildEditorPane() {
         pathHeader.getStyleClass().add("dim-label");
         dirtyIndicator.getStyleClass().add("caution-label");
 
+        openFileButton.setDisable(true);
+        openFileButton.setOnAction(e -> handleOpenExternalFile());
+        openFolderButton.setDisable(true);
+        openFolderButton.setOnAction(e -> handleOpenSectionFolder());
         saveButton.setDisable(true);
         saveButton.setOnAction(e -> handleSaveItem());
 
-        HBox topBar = new HBox(10, pathHeader, dirtyIndicator, saveButton);
+        HBox topBar = new HBox(8, pathHeader, dirtyIndicator, openFileButton, openFolderButton, saveButton);
         topBar.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(pathHeader, Priority.ALWAYS);
 
@@ -411,7 +458,7 @@ public class CourseTabView extends BorderPane {
     }
 
     private void handleSaveItem() {
-        if (selectedItem == null) {
+        if (selectedItem == null || !selectedItem.isMarkdown()) {
             return;
         }
         try {
@@ -423,19 +470,103 @@ public class CourseTabView extends BorderPane {
         }
     }
 
+    private void handleImportFilesDialog() {
+        if (selectedCourse == null) {
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Import Slides, PDF, or Notes into " + selectedCourse.getDisplayName());
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Class Files (*.pdf, *.pptx, *.ppt, *.docx, *.md, *.txt, *.png, *.jpg)",
+                        "*.pdf", "*.pptx", "*.ppt", "*.docx", "*.md", "*.txt", "*.png", "*.jpg"),
+                new FileChooser.ExtensionFilter("All Files (*.*)", "*.*")
+        );
+        List<File> chosen = chooser.showOpenMultipleDialog(getScene().getWindow());
+        if (chosen != null && !chosen.isEmpty()) {
+            importFilesList(chosen);
+        }
+    }
+
+    private void importFilesList(List<File> files) {
+        if (selectedCourse == null || files == null || files.isEmpty()) {
+            return;
+        }
+        CourseItem lastImported = null;
+        int importedCount = 0;
+        for (File file : files) {
+            try {
+                lastImported = courseManager.importExternalFile(selectedCourse, selectedSection, file.toPath());
+                importedCount++;
+            } catch (IllegalArgumentException | IOException ex) {
+                publishStatus("Could not import " + file.getName() + ": " + ex.getMessage());
+            }
+        }
+        if (importedCount > 0) {
+            refreshItems();
+            if (lastImported != null) {
+                itemListView.getSelectionModel().select(lastImported);
+            }
+            publishStatus("Stored " + importedCount + " file(s) in " + selectedCourse.getDisplayName() + " / " + selectedSection.getLabel());
+        }
+    }
+
+    private void handleOpenExternalFile() {
+        if (selectedItem == null) {
+            return;
+        }
+        openPathInDesktop(selectedItem.getFilePath());
+    }
+
+    private void handleOpenSectionFolder() {
+        if (selectedCourse == null) {
+            return;
+        }
+        Path folder = selectedCourse.getDirectory().resolve(selectedSection.getFolderName());
+        openPathInDesktop(folder);
+    }
+
+    private void openPathInDesktop(Path target) {
+        if (!Desktop.isDesktopSupported()) {
+            publishStatus("Desktop open is not supported on this system.");
+            return;
+        }
+        CalendarService.backgroundExecutor().execute(() -> {
+            try {
+                Desktop.getDesktop().open(target.toFile());
+            } catch (IOException ex) {
+                javafx.application.Platform.runLater(() ->
+                        publishStatus("Could not open " + target.getFileName() + ": " + ex.getMessage()));
+            }
+        });
+    }
+
     private void loadItemIntoEditor(CourseItem item) {
-        if (dirty && selectedItem != null && !selectedItem.equals(item)) {
+        if (dirty && selectedItem != null && selectedItem.isMarkdown() && !selectedItem.equals(item)) {
             handleSaveItem();
         }
         loadingEditor = true;
         try {
-            String text = courseManager.readItem(item);
             selectedItem = item;
             pathHeader.setText(item.getRelativeDisplayPath());
-            editor.setText(text);
-            editor.setDisable(false);
             deleteItemButton.setDisable(false);
-            saveButton.setDisable(false);
+            openFileButton.setDisable(false);
+
+            if (item.isMarkdown()) {
+                String text = courseManager.readItem(item);
+                editor.setText(text);
+                editor.setDisable(false);
+                saveButton.setDisable(false);
+            } else {
+                long bytes = Files.size(item.getFilePath());
+                long kb = Math.max(1L, Math.round(bytes / 1024.0));
+                editor.setText("Stored locally at:\n"
+                        + item.getFilePath().toAbsolutePath() + "\n"
+                        + "Size: " + kb + " KB\n\n"
+                        + "Click 'Open File' above (or double-click the file in the list) to open this PowerPoint/PDF in your default application,\n"
+                        + "or click 'Open Folder' to view it in Windows Explorer.");
+                editor.setDisable(true);
+                saveButton.setDisable(true);
+            }
             setDirty(false);
         } catch (IOException ex) {
             publishStatus("Could not read file: " + ex.getMessage());
@@ -451,6 +582,7 @@ public class CourseTabView extends BorderPane {
         editor.clear();
         editor.setDisable(true);
         deleteItemButton.setDisable(true);
+        openFileButton.setDisable(true);
         saveButton.setDisable(true);
         setDirty(false);
         loadingEditor = false;
