@@ -6,10 +6,13 @@
 - `AppPaths` resolves the local data directory with overrides, covered by `AppPathsTest`.
 
 ## Milestone 2: Data Model and SQLite Storage (Completed)
+- `CalendarEvent`, `RecurringRule`, `ScheduleGoal`, `SchedulePreferences`, `EventCategory`, `EventSource`, and `GoalType`.
+- `DatabaseManager` and `CalendarRepository` persist and query events, recurring rules, goals, and preferences in SQLite.
+
+## Milestone 3: ICS Import and Export (Completed)
 - **What works**:
-  - `CalendarEvent`, `RecurringRule` (including midnight-crossing expansion), `ScheduleGoal`, `SchedulePreferences`, `EventCategory`, `EventSource`, and `GoalType`.
-  - `DatabaseManager` initializes SQLite schema (`events`, `recurring_rules`, `goals`, `preferences`).
-  - `CalendarRepository` supports CRUD, UID-based upsert for imports, ISO-8601 range queries, and preferences persistence.
-  - Unit tests in `RecurringRuleTest` and `CalendarRepositoryTest` pass.
+  - `IcsParser` supports both `.ics` files and pasted text, RFC 5545 line unfolding, text unescaping, UTC/`TZID`/floating/`VALUE=DATE` timestamps, `DURATION` fallback, and weekly `RRULE` (`BYDAY`, `UNTIL`).
+  - `IcsExporter` emits valid RFC 5545 CRLF output with text escaping, 75-character line folding, single events, and weekly `RRULE` rules.
+  - `IcsParserTest` and `IcsExporterTest` pass including full export/re-parse round-trips.
 - **What's next**:
-  - Milestone 3: `.ics` import (file and pasted text) and `.ics` export with unit tests.
+  - Milestone 4: Rule-based parser for natural language schedule phrases with unit tests.
