@@ -26,10 +26,12 @@
 - `CalendarService`, `WeekGridView`, `CalendarTabView`, and `MainWindow` deliver week rendering, sentence input, `.ics` import/export, and sidebar management.
 
 ## Milestone 8: Course Organizer (Completed)
+- `Course`, `CourseSection`, `CourseItem`, `CourseManager`, and `CourseTabView` store courses by course number with lectures, notes, and coursework markdown files.
+
+## Milestone 9: Zip and Markdown Export (Completed)
 - **What works**:
-  - `Course`, `CourseSection`, `CourseItem`, and `CourseManager` store courses as real directories and markdown files under `<dataDir>/courses/`.
-  - Courses sort numerically by course number, and markdown items sort naturally (`lecture-01.md`, `lecture-2.md`, `lecture-10.md`).
-  - `CourseTabView` provides a three-pane course browser, section tabs (`Lectures`, `Notes`, `Coursework`), and a live markdown editor with `Ctrl+S` save.
-  - `CourseManagerTest` passes with folder verification, numeric sorting, natural item sorting, CRUD, and path-traversal checks.
+  - `CourseExporter` exports a single course or all courses into a `.zip` archive with normalized LF markdown, `README.md` index, and merged `combined.md`, skipping non-markdown files.
+  - `Export Course (.zip)` and `Export All (.zip)` buttons are wired in `CourseTabView`.
+  - `CourseExporterTest` verifies single-course export, multi-course numeric sort order, empty-course handling, and markdown normalization.
 - **What's next**:
-  - Milestone 9: Zip and clean markdown export (`CourseExporter`) wired into `CourseTabView`.
+  - Milestone 10: Windows `jpackage` build script, executable smoke test, final docs polish, and full verification review.
