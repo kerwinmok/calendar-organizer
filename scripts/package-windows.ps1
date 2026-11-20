@@ -28,6 +28,12 @@ try {
         --main-jar "calendar-organizer-1.0.0.jar" `
         --main-class "com.calendarorganizer.Launcher" `
         --app-version "1.0.0" `
+        --java-options "-Xms32m" `
+        --java-options "-Xmx256m" `
+        --java-options "-XX:+UseG1GC" `
+        --java-options "-XX:MaxGCPauseMillis=20" `
+        --java-options "-XX:MinHeapFreeRatio=15" `
+        --java-options "-XX:MaxHeapFreeRatio=30" `
         --dest $distDir
 
     if ($LASTEXITCODE -ne 0) {
