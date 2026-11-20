@@ -9,8 +9,11 @@ import com.calendarorganizer.storage.DatabaseManager;
 import com.calendarorganizer.ui.MainWindow;
 import javafx.application.Application;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 
 public class MainApp extends Application {
@@ -33,9 +36,19 @@ public class MainApp extends Application {
         }
 
         stage.setTitle("Calendar Organizer");
+        loadAppIcon(stage);
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> root.flushPendingEdits());
         stage.show();
+    }
+
+    private void loadAppIcon(Stage stage) {
+        try (InputStream iconStream = MainApp.class.getResourceAsStream("/app-icon.png")) {
+            if (iconStream != null) {
+                stage.getIcons().add(new Image(iconStream));
+            }
+        } catch (IOException ignored) {
+        }
     }
 
     public static void launchApp(String[] args) {
