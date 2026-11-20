@@ -7,16 +7,19 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Line;
 
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -32,13 +35,16 @@ public class WeekGridView extends VBox {
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
 
     private final List<Label> dayHeaders = new ArrayList<>();
-    private final List<Pane> dayColumns = new ArrayList<>();
+    private final List<Pane> eventLayers = new ArrayList<>();
+    private final List<StackPane> dayColumns = new ArrayList<>();
     private final ScrollPane scrollPane;
+    private final Line nowLine = new Line();
 
     private LocalDate weekStart;
     private List<CalendarEvent> currentEvents = List.of();
     private CalendarEvent selectedEvent;
     private Consumer<CalendarEvent> onEventSelected;
+    private boolean relayoutScheduled;
 
     public WeekGridView() {
         HBox headerRow = new HBox();
@@ -53,45 +59,89 @@ public class WeekGridView extends VBox {
         HBox bodyColumns = new HBox();
         bodyColumns.getChildren().add(gutterPane);
 
+        nowLine.getStyleClass().add("now-line");
+        nowLine.setStartX(0);
+        nowLine.setMouseTransparent(true);
+
         for (int i = 0; i < 7; i++) {
             Label dayLabel = new Label();
             dayLabel.getStyleClass().add("day-header-label");
             dayLabel.setAlignment(Pos.CENTER);
 
-            Pane dayPane = new Pane();
-            dayPane.getStyleClass().add("day-column");
-            dayPane.setMinWidth(80);
-            dayPane.setPrefWidth(120);
-            dayPane.setMaxWidth(Double.MAX_VALUE);
-            dayPane.setMinHeight(TOTAL_HEIGHT);
-            dayPane.setPrefHeight(TOTAL_HEIGHT);
-            dayPane.setMaxHeight(TOTAL_HEIGHT);
-            HBox.setHgrow(dayPane, Priority.ALWAYS);
+            StackPane columnStack = new StackPane();
+            columnStack.getStyleClass().add("day-column");
+            columnStack.setMinWidth(80);
+            columnStack.setPrefWidth(120);
+            columnStack.setMaxWidth(Double.MAX_VALUE);
+            columnStack.setMinHeight(TOTAL_HEIGHT);
+            columnStack.setPrefHeight(TOTAL_HEIGHT);
+            columnStack.setMaxHeight(TOTAL_HEIGHT);
+            HBox.setHgrow(columnStack, Priority.ALWAYS);
 
-            dayLabel.minWidthProperty().bind(dayPane.widthProperty());
-            dayLabel.prefWidthProperty().bind(dayPane.widthProperty());
-            dayLabel.maxWidthProperty().bind(dayPane.widthProperty());
+            Pane gridLayer = createStaticGridLayer(columnStack);
+            Pane eventsLayer = new Pane();
+            eventsLayer.setMinHeight(TOTAL_HEIGHT);
+            eventsLayer.setPrefHeight(TOTAL_HEIGHT);
+            eventsLayer.setMaxHeight(TOTAL_HEIGHT);
+            columnStack.getChildren().addAll(gridLayer, eventsLayer);
 
-            dayPane.widthProperty().addListener((obs, oldW, newW) -> renderEvents());
+            dayLabel.minWidthProperty().bind(columnStack.widthProperty());
+            dayLabel.prefWidthProperty().bind(columnStack.widthProperty());
+            dayLabel.maxWidthProperty().bind(columnStack.widthProperty());
 
             dayHeaders.add(dayLabel);
-            dayColumns.add(dayPane);
+            dayColumns.add(columnStack);
+            eventLayers.add(eventsLayer);
             headerRow.getChildren().add(dayLabel);
-            bodyColumns.getChildren().add(dayPane);
+            bodyColumns.getChildren().add(columnStack);
         }
+
+        //coalesce resize relayouts to once per ui frame
+        bodyColumns.widthProperty().addListener((obs, oldW, newW) -> scheduleRelayout());
 
         scrollPane = new ScrollPane(bodyColumns);
         scrollPane.setFitToWidth(true);
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.addEventFilter(ScrollEvent.SCROLL, event -> {
+            if (event.getDeltaY() != 0 && !event.isControlDown()) {
+                double contentHeight = TOTAL_HEIGHT - scrollPane.getViewportBounds().getHeight();
+                if (contentHeight > 0) {
+                    double step = -(event.getDeltaY() * 2.4) / contentHeight;
+                    double nextV = Math.max(0.0, Math.min(1.0, scrollPane.getVvalue() + step));
+                    scrollPane.setVvalue(nextV);
+                    event.consume();
+                }
+            }
+        });
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
         getChildren().addAll(headerRow, scrollPane);
         Platform.runLater(() -> scrollPane.setVvalue(6.0 / 24.0));
     }
 
+    private Pane createStaticGridLayer(StackPane owner) {
+        Pane grid = new Pane();
+        grid.setMouseTransparent(true);
+        grid.setMinHeight(TOTAL_HEIGHT);
+        grid.setPrefHeight(TOTAL_HEIGHT);
+        grid.setMaxHeight(TOTAL_HEIGHT);
+        for (int hour = 0; hour <= 24; hour++) {
+            double y = hour * HOUR_HEIGHT;
+            Line line = new Line();
+            line.setStartX(0);
+            line.setStartY(y);
+            line.setEndY(y);
+            line.endXProperty().bind(owner.widthProperty());
+            line.getStyleClass().add("hour-line");
+            grid.getChildren().add(line);
+        }
+        return grid;
+    }
+
     private Pane buildTimeGutter() {
         Pane gutter = new Pane();
+        gutter.getStyleClass().add("time-gutter");
         gutter.setMinWidth(GUTTER_WIDTH);
         gutter.setPrefWidth(GUTTER_WIDTH);
         gutter.setMaxWidth(GUTTER_WIDTH);
@@ -105,6 +155,17 @@ public class WeekGridView extends VBox {
             gutter.getChildren().add(label);
         }
         return gutter;
+    }
+
+    private void scheduleRelayout() {
+        if (relayoutScheduled) {
+            return;
+        }
+        relayoutScheduled = true;
+        Platform.runLater(() -> {
+            relayoutScheduled = false;
+            renderEvents();
+        });
     }
 
     public void setOnEventSelected(Consumer<CalendarEvent> listener) {
@@ -143,28 +204,32 @@ public class WeekGridView extends VBox {
         if (weekStart == null) {
             return;
         }
+        LocalDate today = LocalDate.now();
         for (int d = 0; d < 7; d++) {
-            Pane column = dayColumns.get(d);
-            column.getChildren().clear();
-            addHourLines(column);
+            Pane layer = eventLayers.get(d);
+            layer.getChildren().clear();
 
             LocalDate day = weekStart.plusDays(d);
             List<DaySlice> slices = collectDaySlices(day);
-            layoutDaySlices(column, slices);
+            layoutDaySlices(dayColumns.get(d), layer, slices);
+
+            if (day.equals(today)) {
+                addNowLine(dayColumns.get(d), layer);
+            }
         }
     }
 
-    private void addHourLines(Pane column) {
+    private void addNowLine(StackPane column, Pane layer) {
+        LocalTime now = LocalTime.now();
+        double y = ((now.getHour() * 60.0 + now.getMinute()) / 60.0) * HOUR_HEIGHT;
         double width = column.getWidth();
         if (width <= 0) {
-            width = 140.0;
+            width = 120.0;
         }
-        for (int hour = 0; hour <= 24; hour++) {
-            double y = hour * HOUR_HEIGHT;
-            Line line = new Line(0, y, width, y);
-            line.getStyleClass().add("hour-line");
-            column.getChildren().add(line);
-        }
+        nowLine.setStartY(y);
+        nowLine.setEndY(y);
+        nowLine.setEndX(width);
+        layer.getChildren().add(nowLine);
     }
 
     private List<DaySlice> collectDaySlices(LocalDate day) {
@@ -194,7 +259,7 @@ public class WeekGridView extends VBox {
         return slices;
     }
 
-    private void layoutDaySlices(Pane column, List<DaySlice> slices) {
+    private void layoutDaySlices(StackPane column, Pane layer, List<DaySlice> slices) {
         double colWidth = column.getWidth();
         if (colWidth <= 0) {
             colWidth = 120.0;
@@ -239,7 +304,7 @@ public class WeekGridView extends VBox {
             box.setMaxWidth(laneWidth);
             box.setPrefHeight(height);
             box.setMaxHeight(height);
-            column.getChildren().add(box);
+            layer.getChildren().add(box);
         }
     }
 
