@@ -19,10 +19,6 @@ public class CourseManager {
         this.coursesRoot = coursesRoot.toAbsolutePath().normalize();
     }
 
-    public Path getCoursesRoot() {
-        return coursesRoot;
-    }
-
     public List<Course> listCourses() throws IOException {
         Files.createDirectories(coursesRoot);
         List<Course> courses = new ArrayList<>();

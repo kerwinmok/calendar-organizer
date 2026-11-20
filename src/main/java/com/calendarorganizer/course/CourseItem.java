@@ -17,14 +17,6 @@ public class CourseItem {
         this.filePath = filePath;
     }
 
-    public Course getCourse() {
-        return course;
-    }
-
-    public CourseSection getSection() {
-        return section;
-    }
-
     public String getFileName() {
         return fileName;
     }

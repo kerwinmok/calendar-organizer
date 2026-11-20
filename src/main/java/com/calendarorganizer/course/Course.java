@@ -87,18 +87,6 @@ public class Course implements Comparable<Course> {
         return displayName;
     }
 
-    public String getDepartment() {
-        return department;
-    }
-
-    public Integer getCourseNumber() {
-        return courseNumber;
-    }
-
-    public String getSuffix() {
-        return suffix;
-    }
-
     public Path getDirectory() {
         return directory;
     }

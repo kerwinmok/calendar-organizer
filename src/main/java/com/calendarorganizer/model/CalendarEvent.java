@@ -64,10 +64,6 @@ public class CalendarEvent {
         return new CalendarEvent(newId, uid, title, startTime, endTime, category, source, notes);
     }
 
-    public CalendarEvent withTimes(LocalDateTime newStart, LocalDateTime newEnd) {
-        return new CalendarEvent(id, uid, title, newStart, newEnd, category, source, notes);
-    }
-
     public long getId() {
         return id;
     }
