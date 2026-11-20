@@ -20,9 +20,13 @@
 - `LlmProvider` interface with `OllamaProvider`, `GeminiProvider`, `ScheduleParserService`, and `RuleParser` fallback.
 
 ## Milestone 6: Deterministic Scheduler (Completed)
+- `TimeInterval` and `Scheduler` place workout and study sessions deterministically around fixed blocks, recurring rules, midnight-crossing events, and sleep hours.
+
+## Milestone 7: Calendar UI (Completed)
 - **What works**:
-  - `TimeInterval` handles clipping, interval merging, and subtraction against day windows.
-  - `Scheduler` places workout and study sessions deterministically with zero overlaps across fixed events, recurring rules, midnight-crossing blocks, and sleep windows.
-  - `SchedulerTest` covers normal weeks, midnight-crossing events, completely booked days, full weeks, split study blocks, and varying sleep times.
+  - `CalendarService` coordinates parsing, SQLite storage, automatic rescheduling, and `.ics` import/export, covered by `CalendarServiceTest`.
+  - `WeekGridView` renders a 7-day Mon–Sun 24-hour calendar grid with color-coded event blocks, midnight split rendering, and side-by-side overlap layout.
+  - `CalendarTabView` provides the sentence input bar (`Auto`/`Rules`/`Ollama`/`Gemini`), week navigation, `.ics` file import, paste-`.ics` modal dialog, `.ics` export, sleep editor, rules/goals management, and selected-event deletion.
+  - `MainWindow` and `MainApp` launch cleanly on Windows.
 - **What's next**:
-  - Milestone 7: `CalendarService` and JavaFX week calendar UI with add-by-sentence, `.ics` import/export, and sidebar controls.
+  - Milestone 8: Course organizer with numeric course sorting and disk-backed markdown lectures, notes, and coursework.
