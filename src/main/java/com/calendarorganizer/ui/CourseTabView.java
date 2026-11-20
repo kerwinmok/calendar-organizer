@@ -5,17 +5,16 @@ import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
-import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.input.KeyCode;
@@ -30,16 +29,22 @@ import javafx.stage.FileChooser;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 public class CourseTabView extends BorderPane {
 
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
 
+    private final SplitPane splitPane;
+    private final VBox coursesRail;
     private final ListView<Course> courseListView = new ListView<>();
-    private final TabPane sectionTabs = new TabPane();
+    private final List<Button> sectionButtons = new ArrayList<>();
     private final ListView<CourseItem> itemListView = new ListView<>();
     private final Label courseHeading = new Label("Select a course");
     private final Label pathHeader = new Label("No file selected");
@@ -49,28 +54,31 @@ public class CourseTabView extends BorderPane {
     private final Button newItemButton = new Button("+ New Markdown");
     private final Button deleteItemButton = new Button("Delete File");
     private final Button deleteCourseButton = new Button("Delete Course");
-    private final Button exportCourseButton = new Button("Export Course (.zip)");
-    private final Button exportAllButton = new Button("Export All (.zip)");
-    private final Label statusLabel = new Label("Ready.");
 
+    private List<Course> allCourses = List.of();
+    private String filterText = "";
     private Course selectedCourse;
     private CourseSection selectedSection = CourseSection.LECTURES;
     private CourseItem selectedItem;
     private boolean dirty;
     private boolean loadingEditor;
+    private boolean railVisible = true;
+    private UiTheme activeTheme = UiTheme.CHARCOAL;
+    private String lastStatus = "Ready.";
+    private Consumer<String> onStatusChanged;
+    private Runnable onStateChanged;
 
     public CourseTabView(CourseManager courseManager, CourseExporter courseExporter) {
         this.courseManager = courseManager;
         this.courseExporter = courseExporter;
 
-        SplitPane splitPane = new SplitPane(
-                buildCoursesPane(),
-                buildSectionFilesPane(),
-                buildEditorPane()
-        );
-        splitPane.setDividerPositions(0.22, 0.46);
+        this.coursesRail = buildCoursesPane();
+        VBox filesPane = buildSectionFilesPane();
+        VBox editorPane = buildEditorPane();
+
+        this.splitPane = new SplitPane(coursesRail, filesPane, editorPane);
+        this.splitPane.setDividerPositions(0.22, 0.45);
         setCenter(splitPane);
-        setBottom(buildStatusBar());
 
         refreshCourses();
     }
@@ -83,23 +91,23 @@ public class CourseTabView extends BorderPane {
         courseListView.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 selectedCourse = newVal;
-                courseHeading.setText(newVal.getDisplayName() + " (" + newVal.getFolderName() + ")");
+                courseHeading.setText(newVal.getDisplayName());
                 deleteCourseButton.setDisable(false);
-                exportCourseButton.setDisable(false);
                 newItemButton.setDisable(false);
                 refreshItems();
             } else {
                 selectedCourse = null;
                 courseHeading.setText("Select a course");
                 deleteCourseButton.setDisable(true);
-                exportCourseButton.setDisable(true);
                 newItemButton.setDisable(true);
                 itemListView.getItems().clear();
                 clearEditor();
             }
+            notifyStateChanged();
         });
 
         Button newCourseBtn = new Button("+ New Course");
+        newCourseBtn.getStyleClass().add("lc-btn-primary");
         newCourseBtn.setMaxWidth(Double.MAX_VALUE);
         newCourseBtn.setOnAction(e -> handleCreateCourse());
 
@@ -107,33 +115,28 @@ public class CourseTabView extends BorderPane {
         deleteCourseButton.setDisable(true);
         deleteCourseButton.setOnAction(e -> handleDeleteCourse());
 
-        exportCourseButton.setMaxWidth(Double.MAX_VALUE);
-        exportCourseButton.setDisable(true);
-        exportCourseButton.setOnAction(e -> handleExportSingleCourse());
-        exportAllButton.setMaxWidth(Double.MAX_VALUE);
-        exportAllButton.setOnAction(e -> handleExportAllCourses());
-
-        VBox pane = new VBox(8, heading, courseListView, newCourseBtn, deleteCourseButton,
-                new Separator(), exportCourseButton, exportAllButton);
+        VBox pane = new VBox(8, heading, courseListView, newCourseBtn, deleteCourseButton);
+        pane.getStyleClass().add("lc-left-rail");
         pane.setPadding(new Insets(10));
+        pane.setMinWidth(180);
         return pane;
     }
 
     private VBox buildSectionFilesPane() {
         courseHeading.getStyleClass().add("section-heading");
 
-        sectionTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        HBox segmentGroup = new HBox(2);
+        segmentGroup.getStyleClass().add("lc-segment-group");
         for (CourseSection section : CourseSection.values()) {
-            Tab tab = new Tab(section.getLabel());
-            tab.setUserData(section);
-            sectionTabs.getTabs().add(tab);
+            Button btn = new Button(section.getLabel());
+            btn.getStyleClass().add("lc-segment");
+            btn.setMaxWidth(Double.MAX_VALUE);
+            HBox.setHgrow(btn, Priority.ALWAYS);
+            btn.setOnAction(e -> selectSection(section));
+            sectionButtons.add(btn);
+            segmentGroup.getChildren().add(btn);
         }
-        sectionTabs.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
-            if (newTab != null && newTab.getUserData() instanceof CourseSection) {
-                selectedSection = (CourseSection) newTab.getUserData();
-                refreshItems();
-            }
-        });
+        updateSectionButtons();
 
         VBox.setVgrow(itemListView, Priority.ALWAYS);
         itemListView.getSelectionModel().selectedItemProperty().addListener((obs, oldItem, newItem) -> {
@@ -150,14 +153,16 @@ public class CourseTabView extends BorderPane {
         deleteItemButton.setOnAction(e -> handleDeleteItem());
 
         HBox buttons = new HBox(8, newItemButton, deleteItemButton);
-        VBox pane = new VBox(8, courseHeading, sectionTabs, itemListView, buttons);
+        VBox pane = new VBox(8, courseHeading, segmentGroup, itemListView, buttons);
+        pane.getStyleClass().add("lc-inset-pane");
         pane.setPadding(new Insets(10));
+        pane.setMinWidth(220);
         return pane;
     }
 
     private VBox buildEditorPane() {
-        pathHeader.getStyleClass().add("section-heading");
-        dirtyIndicator.setStyle("-fx-text-fill: #b45309; -fx-font-weight: bold;");
+        pathHeader.getStyleClass().add("dim-label");
+        dirtyIndicator.getStyleClass().add("caution-label");
 
         saveButton.setDisable(true);
         saveButton.setOnAction(e -> handleSaveItem());
@@ -185,50 +190,113 @@ public class CourseTabView extends BorderPane {
         });
 
         VBox pane = new VBox(8, topBar, editor);
+        pane.getStyleClass().add("lc-canvas-pane");
         pane.setPadding(new Insets(10));
         return pane;
     }
 
-    private HBox buildStatusBar() {
-        statusLabel.getStyleClass().add("status-label");
-        HBox bar = new HBox(statusLabel);
-        bar.setPadding(new Insets(6, 12, 6, 12));
-        bar.getStyleClass().add("toolbar-bar");
-        return bar;
+    private void selectSection(CourseSection section) {
+        this.selectedSection = section;
+        updateSectionButtons();
+        refreshItems();
     }
 
-    public Button getExportCourseButton() {
-        return exportCourseButton;
+    private void updateSectionButtons() {
+        CourseSection[] values = CourseSection.values();
+        for (int i = 0; i < values.length; i++) {
+            Button btn = sectionButtons.get(i);
+            btn.getStyleClass().remove("lc-segment-active");
+            if (values[i] == selectedSection) {
+                btn.getStyleClass().add("lc-segment-active");
+            }
+        }
     }
 
-    public Button getExportAllButton() {
-        return exportAllButton;
+    public void setActiveTheme(UiTheme theme) {
+        this.activeTheme = theme;
     }
 
-    public Course getSelectedCourse() {
-        return selectedCourse;
+    public void setOnStatusChanged(Consumer<String> listener) {
+        this.onStatusChanged = listener;
     }
 
-    public void setStatus(String message) {
-        statusLabel.setText(message);
+    public void setOnStateChanged(Runnable listener) {
+        this.onStateChanged = listener;
+    }
+
+    public void toggleRail() {
+        railVisible = !railVisible;
+        if (railVisible) {
+            if (!splitPane.getItems().contains(coursesRail)) {
+                splitPane.getItems().add(0, coursesRail);
+                splitPane.setDividerPositions(0.22, 0.45);
+            }
+        } else {
+            splitPane.getItems().remove(coursesRail);
+            splitPane.setDividerPositions(0.32);
+        }
+    }
+
+    public void setFilterText(String query) {
+        if (query == null) {
+            this.filterText = "";
+        } else {
+            this.filterText = query.trim().toLowerCase(Locale.ROOT);
+        }
+        applyCourseFilter();
+    }
+
+    public boolean hasSelectedCourse() {
+        return selectedCourse != null;
+    }
+
+    public boolean hasCourses() {
+        return !allCourses.isEmpty();
+    }
+
+    public String getActiveLocationSummary() {
+        if (selectedItem == null) {
+            if (selectedCourse != null) {
+                return selectedCourse.getDisplayName() + " / " + selectedSection.getLabel();
+            }
+            return "No course file selected";
+        }
+        if (dirty) {
+            return selectedItem.getRelativeDisplayPath() + "  (Unsaved)";
+        }
+        return selectedItem.getRelativeDisplayPath();
+    }
+
+    public String getLastStatus() {
+        return lastStatus;
     }
 
     public void refreshCourses() {
         try {
-            List<Course> courses = courseManager.listCourses();
-            Course previous = selectedCourse;
-            courseListView.getItems().setAll(courses);
-            if (previous != null && courses.contains(previous)) {
-                courseListView.getSelectionModel().select(previous);
-            } else if (!courses.isEmpty()) {
-                courseListView.getSelectionModel().selectFirst();
-            } else {
-                courseListView.getSelectionModel().clearSelection();
-            }
-            exportAllButton.setDisable(courses.isEmpty());
+            allCourses = courseManager.listCourses();
+            applyCourseFilter();
         } catch (IOException ex) {
-            statusLabel.setText("Failed to load courses: " + ex.getMessage());
+            publishStatus("Failed to load courses: " + ex.getMessage());
         }
+    }
+
+    private void applyCourseFilter() {
+        List<Course> filtered = new ArrayList<>();
+        for (Course course : allCourses) {
+            if (filterText.isEmpty() || course.getDisplayName().toLowerCase(Locale.ROOT).contains(filterText)) {
+                filtered.add(course);
+            }
+        }
+        Course previous = selectedCourse;
+        courseListView.getItems().setAll(filtered);
+        if (previous != null && filtered.contains(previous)) {
+            courseListView.getSelectionModel().select(previous);
+        } else if (!filtered.isEmpty()) {
+            courseListView.getSelectionModel().selectFirst();
+        } else {
+            courseListView.getSelectionModel().clearSelection();
+        }
+        notifyStateChanged();
     }
 
     private void refreshItems() {
@@ -249,15 +317,18 @@ public class CourseTabView extends BorderPane {
                 clearEditor();
             }
         } catch (IOException ex) {
-            statusLabel.setText("Failed to list markdown files: " + ex.getMessage());
+            publishStatus("Failed to list markdown files: " + ex.getMessage());
         }
     }
 
     private void handleCreateCourse() {
         TextInputDialog dialog = new TextInputDialog();
+        dialog.initOwner(getScene().getWindow());
         dialog.setTitle("New Course");
         dialog.setHeaderText("Create a new course folder");
         dialog.setContentText("Course code/name (e.g. CMPT 201):");
+        applyDialogTheme(dialog.getDialogPane());
+
         Optional<String> entered = dialog.showAndWait();
         if (entered.isEmpty()) {
             return;
@@ -266,9 +337,9 @@ public class CourseTabView extends BorderPane {
             Course created = courseManager.createCourse(entered.get());
             refreshCourses();
             courseListView.getSelectionModel().select(created);
-            statusLabel.setText("Created course: " + created.getDisplayName());
+            publishStatus("Created course: " + created.getDisplayName());
         } catch (IllegalArgumentException | IOException ex) {
-            statusLabel.setText("Could not create course: " + ex.getMessage());
+            publishStatus("Could not create course: " + ex.getMessage());
         }
     }
 
@@ -277,8 +348,11 @@ public class CourseTabView extends BorderPane {
             return;
         }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.initOwner(getScene().getWindow());
         confirm.setTitle("Delete Course");
         confirm.setHeaderText("Delete " + selectedCourse.getDisplayName() + " and all its files?");
+        applyDialogTheme(confirm.getDialogPane());
+
         Optional<ButtonType> choice = confirm.showAndWait();
         if (choice.isEmpty() || choice.get() != ButtonType.OK) {
             return;
@@ -289,9 +363,9 @@ public class CourseTabView extends BorderPane {
             selectedCourse = null;
             selectedItem = null;
             refreshCourses();
-            statusLabel.setText("Deleted course: " + name);
+            publishStatus("Deleted course: " + name);
         } catch (IOException ex) {
-            statusLabel.setText("Delete failed: " + ex.getMessage());
+            publishStatus("Delete failed: " + ex.getMessage());
         }
     }
 
@@ -300,9 +374,12 @@ public class CourseTabView extends BorderPane {
             return;
         }
         TextInputDialog dialog = new TextInputDialog();
+        dialog.initOwner(getScene().getWindow());
         dialog.setTitle("New Markdown File");
         dialog.setHeaderText("New file in " + selectedCourse.getDisplayName() + " / " + selectedSection.getLabel());
         dialog.setContentText("File title (leave blank to auto-number):");
+        applyDialogTheme(dialog.getDialogPane());
+
         Optional<String> entered = dialog.showAndWait();
         if (entered.isEmpty()) {
             return;
@@ -311,9 +388,9 @@ public class CourseTabView extends BorderPane {
             CourseItem created = courseManager.createItem(selectedCourse, selectedSection, entered.get(), null);
             refreshItems();
             itemListView.getSelectionModel().select(created);
-            statusLabel.setText("Created " + created.getRelativeDisplayPath());
+            publishStatus("Created " + created.getRelativeDisplayPath());
         } catch (IllegalArgumentException | IOException ex) {
-            statusLabel.setText("Could not create file: " + ex.getMessage());
+            publishStatus("Could not create file: " + ex.getMessage());
         }
     }
 
@@ -326,9 +403,9 @@ public class CourseTabView extends BorderPane {
             courseManager.deleteItem(selectedItem);
             selectedItem = null;
             refreshItems();
-            statusLabel.setText("Deleted " + path);
+            publishStatus("Deleted " + path);
         } catch (IOException ex) {
-            statusLabel.setText("Delete failed: " + ex.getMessage());
+            publishStatus("Delete failed: " + ex.getMessage());
         }
     }
 
@@ -339,9 +416,9 @@ public class CourseTabView extends BorderPane {
         try {
             courseManager.saveItem(selectedItem, editor.getText());
             setDirty(false);
-            statusLabel.setText("Saved " + selectedItem.getRelativeDisplayPath());
+            publishStatus("Saved " + selectedItem.getRelativeDisplayPath());
         } catch (IOException ex) {
-            statusLabel.setText("Save failed: " + ex.getMessage());
+            publishStatus("Save failed: " + ex.getMessage());
         }
     }
 
@@ -360,7 +437,7 @@ public class CourseTabView extends BorderPane {
             saveButton.setDisable(false);
             setDirty(false);
         } catch (IOException ex) {
-            statusLabel.setText("Could not read file: " + ex.getMessage());
+            publishStatus("Could not read file: " + ex.getMessage());
         } finally {
             loadingEditor = false;
         }
@@ -381,36 +458,52 @@ public class CourseTabView extends BorderPane {
     private void setDirty(boolean isDirty) {
         this.dirty = isDirty;
         if (isDirty) {
-            dirtyIndicator.setText("* Unsaved");
+            dirtyIndicator.setText("Unsaved");
         } else {
             dirtyIndicator.setText("");
         }
+        notifyStateChanged();
     }
 
-    private void handleExportSingleCourse() {
+    public void exportSelectedCourse() {
         if (selectedCourse == null) {
             return;
         }
         if (dirty && selectedItem != null) {
             handleSaveItem();
         }
+        Course targetCourse = selectedCourse;
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Course Study Zip");
-        chooser.setInitialFileName(selectedCourse.getFolderName() + "-study.zip");
+        chooser.setInitialFileName(targetCourse.getFolderName() + "-study.zip");
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("ZIP archive (*.zip)", "*.zip"));
         File file = chooser.showSaveDialog(getScene().getWindow());
         if (file == null) {
             return;
         }
-        try {
-            courseExporter.exportCourse(selectedCourse, file.toPath());
-            statusLabel.setText("Exported " + selectedCourse.getDisplayName() + " to " + file.getAbsolutePath());
-        } catch (IOException ex) {
-            statusLabel.setText("Export failed: " + ex.getMessage());
-        }
+        publishStatus("Exporting " + targetCourse.getDisplayName() + "...");
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws Exception {
+                courseExporter.exportCourse(targetCourse, file.toPath());
+                return null;
+            }
+        };
+        task.setOnSucceeded(ev -> publishStatus("Exported " + targetCourse.getDisplayName() + " to " + file.getAbsolutePath()));
+        task.setOnFailed(ev -> {
+            Throwable err = task.getException();
+            if (err != null) {
+                publishStatus("Export failed: " + err.getMessage());
+            } else {
+                publishStatus("Export failed.");
+            }
+        });
+        Thread worker = new Thread(task, "course-export");
+        worker.setDaemon(true);
+        worker.start();
     }
 
-    private void handleExportAllCourses() {
+    public void exportAllCourses() {
         if (dirty && selectedItem != null) {
             handleSaveItem();
         }
@@ -422,11 +515,52 @@ public class CourseTabView extends BorderPane {
         if (file == null) {
             return;
         }
-        try {
-            courseExporter.exportAllCourses(file.toPath());
-            statusLabel.setText("Exported all courses to " + file.getAbsolutePath());
-        } catch (IOException ex) {
-            statusLabel.setText("Export failed: " + ex.getMessage());
+        publishStatus("Exporting all courses...");
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws Exception {
+                courseExporter.exportAllCourses(file.toPath());
+                return null;
+            }
+        };
+        task.setOnSucceeded(ev -> publishStatus("Exported all courses to " + file.getAbsolutePath()));
+        task.setOnFailed(ev -> {
+            Throwable err = task.getException();
+            if (err != null) {
+                publishStatus("Export failed: " + err.getMessage());
+            } else {
+                publishStatus("Export failed.");
+            }
+        });
+        Thread worker = new Thread(task, "course-export-all");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void publishStatus(String message) {
+        this.lastStatus = message;
+        if (onStatusChanged != null) {
+            onStatusChanged.accept(message);
         }
+    }
+
+    private void notifyStateChanged() {
+        if (onStateChanged != null) {
+            onStateChanged.run();
+        }
+    }
+
+    private void applyDialogTheme(DialogPane pane) {
+        URL cssUrl = CourseTabView.class.getResource("/styles.css");
+        if (cssUrl != null) {
+            String urlStr = cssUrl.toExternalForm();
+            if (!pane.getStylesheets().contains(urlStr)) {
+                pane.getStylesheets().add(urlStr);
+            }
+        }
+        for (UiTheme candidate : UiTheme.values()) {
+            pane.getStyleClass().remove(candidate.getStyleClass());
+        }
+        pane.getStyleClass().add(activeTheme.getStyleClass());
     }
 }

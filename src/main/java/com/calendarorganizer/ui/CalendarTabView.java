@@ -15,23 +15,23 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
-import javafx.scene.control.Separator;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
 import java.io.File;
-import java.io.IOException;
+import java.net.URL;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -42,6 +42,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.function.Consumer;
 
 public class CalendarTabView extends BorderPane {
 
@@ -50,12 +51,7 @@ public class CalendarTabView extends BorderPane {
 
     private final CalendarService service;
     private final WeekGridView weekGridView;
-
-    private final TextField sentenceField = new TextField();
-    private final ComboBox<ParserMode> parserModeBox = new ComboBox<>();
-    private final Button addButton = new Button("Add");
-    private final Label weekLabel = new Label();
-    private final Label statusLabel = new Label("Ready.");
+    private final ScrollPane inspectorScroll;
 
     private final TextField sleepField = new TextField();
     private final ListView<RecurringRule> rulesList = new ListView<>();
@@ -67,84 +63,34 @@ public class CalendarTabView extends BorderPane {
 
     private LocalDate currentWeekStart;
     private CalendarEvent selectedEvent;
+    private boolean inspectorVisible = true;
+    private String lastStatus = "Ready.";
+    private Consumer<String> onStatusChanged;
+    private Runnable onDataChanged;
 
     public CalendarTabView(CalendarService service) {
         this.service = service;
         this.currentWeekStart = service.weekStartOf(LocalDate.now());
         this.weekGridView = new WeekGridView();
         this.weekGridView.setOnEventSelected(this::onEventClicked);
+        this.inspectorScroll = buildInspector();
 
-        setTop(buildTopToolbar());
         setCenter(weekGridView);
-        setRight(buildSidebar());
+        setRight(inspectorScroll);
 
         refreshView();
     }
 
-    private VBox buildTopToolbar() {
-        sentenceField.setPromptText("e.g. \"i work mon-thurs 7-6pm\" or \"i want to work out and study, i'm busy at 8pm for 2 hours, sleep at 12\"");
-        HBox.setHgrow(sentenceField, Priority.ALWAYS);
-        sentenceField.setOnAction(e -> handleAddSentence());
-
-        parserModeBox.getItems().setAll(ParserMode.values());
-        parserModeBox.setValue(ParserMode.AUTO);
-
-        addButton.setOnAction(e -> handleAddSentence());
-        Button scheduleBtn = new Button("Auto-Schedule");
-        scheduleBtn.setOnAction(e -> handleReschedule());
-
-        HBox row1 = new HBox(8, sentenceField, parserModeBox, addButton, scheduleBtn);
-        row1.setAlignment(Pos.CENTER_LEFT);
-
-        Button prevBtn = new Button("< Prev");
-        prevBtn.setOnAction(e -> shiftWeek(-1));
-        Button todayBtn = new Button("Today");
-        todayBtn.setOnAction(e -> {
-            currentWeekStart = service.weekStartOf(LocalDate.now());
-            refreshView();
-        });
-        Button nextBtn = new Button("Next >");
-        nextBtn.setOnAction(e -> shiftWeek(1));
-
-        weekLabel.getStyleClass().add("section-heading");
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        Button importFileBtn = new Button("Import .ics File");
-        importFileBtn.setOnAction(e -> handleImportFile());
-        Button pasteIcsBtn = new Button("Paste .ics");
-        pasteIcsBtn.setOnAction(e -> handlePasteIcs());
-        Button exportBtn = new Button("Export .ics");
-        exportBtn.setOnAction(e -> handleExportIcs());
-        Button clearBtn = new Button("Clear Scheduled");
-        clearBtn.setOnAction(e -> handleClearScheduled());
-
-        HBox row2 = new HBox(8, prevBtn, todayBtn, nextBtn, weekLabel, spacer,
-                importFileBtn, pasteIcsBtn, exportBtn, clearBtn);
-        row2.setAlignment(Pos.CENTER_LEFT);
-
-        statusLabel.getStyleClass().add("status-label");
-        statusLabel.setWrapText(true);
-
-        VBox box = new VBox(8, row1, row2, statusLabel);
-        box.setPadding(new Insets(10, 12, 10, 12));
-        box.getStyleClass().add("toolbar-bar");
-        return box;
-    }
-
-    private VBox buildSidebar() {
-        Label sleepHeading = new Label("Sleep Time");
-        sleepHeading.getStyleClass().add("section-heading");
-        sleepField.setPrefWidth(80);
+    private ScrollPane buildInspector() {
+        sleepField.setPrefWidth(78);
         Button setSleepBtn = new Button("Set");
         setSleepBtn.setOnAction(e -> handleUpdateSleep());
         HBox sleepRow = new HBox(8, sleepField, setSleepBtn);
         sleepRow.setAlignment(Pos.CENTER_LEFT);
+        TitledPane sleepPane = new TitledPane("Sleep Window", sleepRow);
+        sleepPane.setExpanded(true);
 
-        Label rulesHeading = new Label("Recurring Rules");
-        rulesHeading.getStyleClass().add("section-heading");
-        rulesList.setPrefHeight(150);
+        rulesList.setPrefHeight(130);
         rulesList.setCellFactory(list -> new ListCell<>() {
             @Override
             protected void updateItem(RecurringRule item, boolean empty) {
@@ -158,18 +104,20 @@ public class CalendarTabView extends BorderPane {
             }
         });
         Button deleteRuleBtn = new Button("Delete Rule");
+        deleteRuleBtn.setMaxWidth(Double.MAX_VALUE);
         deleteRuleBtn.setOnAction(e -> {
             RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
             if (rule != null) {
                 service.deleteRecurringRule(rule.getId());
                 refreshView();
-                statusLabel.setText("Deleted recurring rule: " + rule.getTitle());
+                publishStatus("Deleted rule: " + rule.getTitle());
             }
         });
+        VBox rulesBox = new VBox(6, rulesList, deleteRuleBtn);
+        TitledPane rulesPane = new TitledPane("Recurring Rules", rulesBox);
+        rulesPane.setExpanded(true);
 
-        Label goalsHeading = new Label("Goals");
-        goalsHeading.getStyleClass().add("section-heading");
-        goalsList.setPrefHeight(130);
+        goalsList.setPrefHeight(115);
         goalsList.setCellFactory(list -> new ListCell<>() {
             @Override
             protected void updateItem(ScheduleGoal item, boolean empty) {
@@ -183,61 +131,88 @@ public class CalendarTabView extends BorderPane {
             }
         });
         Button deleteGoalBtn = new Button("Delete Goal");
+        deleteGoalBtn.setMaxWidth(Double.MAX_VALUE);
         deleteGoalBtn.setOnAction(e -> {
             ScheduleGoal goal = goalsList.getSelectionModel().getSelectedItem();
             if (goal != null) {
                 service.deleteGoal(goal.getId());
                 service.rescheduleWeek(currentWeekStart);
                 refreshView();
-                statusLabel.setText("Deleted goal: " + goal.getTitle());
+                publishStatus("Deleted goal: " + goal.getTitle());
             }
         });
+        VBox goalsBox = new VBox(6, goalsList, deleteGoalBtn);
+        TitledPane goalsPane = new TitledPane("Goals", goalsBox);
+        goalsPane.setExpanded(true);
 
-        Label selectedHeading = new Label("Selected Event");
-        selectedHeading.getStyleClass().add("section-heading");
+        selectedTitleLabel.getStyleClass().add("section-heading");
         selectedTitleLabel.setWrapText(true);
         selectedTimeLabel.setWrapText(true);
+        selectedMetaLabel.getStyleClass().add("dim-label");
         selectedMetaLabel.setWrapText(true);
         deleteEventButton.setDisable(true);
+        deleteEventButton.setMaxWidth(Double.MAX_VALUE);
         deleteEventButton.setOnAction(e -> {
             if (selectedEvent != null && selectedEvent.getId() > 0) {
                 service.deleteEvent(selectedEvent.getId());
                 selectedEvent = null;
                 refreshView();
-                statusLabel.setText("Deleted selected event.");
+                publishStatus("Deleted selected event.");
             }
         });
+        VBox selectedBox = new VBox(6, selectedTitleLabel, selectedTimeLabel, selectedMetaLabel, deleteEventButton);
+        TitledPane selectedPane = new TitledPane("Selected Event", selectedBox);
+        selectedPane.setExpanded(true);
 
-        VBox sidebar = new VBox(8,
-                sleepHeading, sleepRow,
-                new Separator(),
-                rulesHeading, rulesList, deleteRuleBtn,
-                new Separator(),
-                goalsHeading, goalsList, deleteGoalBtn,
-                new Separator(),
-                selectedHeading, selectedTitleLabel, selectedTimeLabel, selectedMetaLabel, deleteEventButton
-        );
-        sidebar.getStyleClass().add("sidebar-pane");
-        sidebar.setPrefWidth(270);
-        sidebar.setMinWidth(240);
-        return sidebar;
+        VBox sections = new VBox(0, sleepPane, rulesPane, goalsPane, selectedPane);
+        sections.setFillWidth(true);
+        VBox.setVgrow(sections, Priority.ALWAYS);
+
+        ScrollPane scroll = new ScrollPane(sections);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setPrefWidth(270);
+        scroll.setMinWidth(240);
+        scroll.getStyleClass().add("lc-sidebar");
+        return scroll;
     }
 
-    private void handleAddSentence() {
-        String text = sentenceField.getText();
+    public void setOnStatusChanged(Consumer<String> listener) {
+        this.onStatusChanged = listener;
+    }
+
+    public void setOnDataChanged(Runnable listener) {
+        this.onDataChanged = listener;
+    }
+
+    public void toggleInspector() {
+        inspectorVisible = !inspectorVisible;
+        if (inspectorVisible) {
+            setRight(inspectorScroll);
+        } else {
+            setRight(null);
+        }
+    }
+
+    public boolean isInspectorVisible() {
+        return inspectorVisible;
+    }
+
+    public void submitSentence(String text, ParserMode mode, Runnable onFinished) {
         if (text == null || text.isBlank()) {
-            statusLabel.setText("Enter a schedule sentence first.");
+            publishStatus("Enter a schedule sentence first.");
+            if (onFinished != null) {
+                onFinished.run();
+            }
             return;
         }
-        ParserMode mode = parserModeBox.getValue();
+
         LocalDate refDate = LocalDate.now();
         if (refDate.isBefore(currentWeekStart) || refDate.isAfter(currentWeekStart.plusDays(6))) {
             refDate = currentWeekStart;
         }
         LocalDate effectiveRef = refDate;
-
-        addButton.setDisable(true);
-        statusLabel.setText("Parsing sentence...");
+        publishStatus("Parsing sentence...");
 
         Task<ApplySentenceResult> task = new Task<>() {
             @Override
@@ -247,63 +222,51 @@ public class CalendarTabView extends BorderPane {
         };
 
         task.setOnSucceeded(ev -> {
-            addButton.setDisable(false);
             ApplySentenceResult res = task.getValue();
-            sentenceField.clear();
             refreshView();
-            statusLabel.setText(formatApplySummary(res));
+            publishStatus(formatApplySummary(res));
+            if (onFinished != null) {
+                onFinished.run();
+            }
         });
 
         task.setOnFailed(ev -> {
-            addButton.setDisable(false);
             Throwable err = task.getException();
             if (err != null) {
-                statusLabel.setText("Error: " + err.getMessage());
+                publishStatus("Error: " + err.getMessage());
             } else {
-                statusLabel.setText("Failed to parse sentence.");
+                publishStatus("Failed to parse sentence.");
+            }
+            if (onFinished != null) {
+                onFinished.run();
             }
         });
 
-        Thread worker = new Thread(task, "sentence-parser");
-        worker.setDaemon(true);
-        worker.start();
+        startDaemon(task, "sentence-parser");
     }
 
-    private void handleReschedule() {
-        ScheduleResult result = service.rescheduleWeek(currentWeekStart);
-        refreshView();
-        String msg = "Scheduled " + result.getScheduledEvents().size() + " goal sessions.";
-        if (!result.getUnscheduledNotes().isEmpty()) {
-            msg = msg + " " + String.join(" ", result.getUnscheduledNotes());
-        }
-        statusLabel.setText(msg);
-    }
-
-    private void handleClearScheduled() {
-        service.clearScheduledEvents();
-        refreshView();
-        statusLabel.setText("Cleared scheduled sessions.");
-    }
-
-    private void handleUpdateSleep() {
-        String raw = sleepField.getText();
-        if (raw == null || raw.isBlank()) {
-            return;
-        }
-        try {
-            LocalTime parsed = LocalTime.parse(raw.trim(), TIME_FMT);
-            service.updateSleepTime(parsed);
-            if (!service.findAllGoals().isEmpty()) {
-                service.rescheduleWeek(currentWeekStart);
+    public void rescheduleCurrentWeek() {
+        publishStatus("Scheduling week...");
+        Task<ScheduleResult> task = new Task<>() {
+            @Override
+            protected ScheduleResult call() {
+                return service.rescheduleWeek(currentWeekStart);
             }
+        };
+        task.setOnSucceeded(ev -> {
+            ScheduleResult result = task.getValue();
             refreshView();
-            statusLabel.setText("Sleep time updated to " + parsed.format(TIME_FMT));
-        } catch (DateTimeParseException ex) {
-            statusLabel.setText("Invalid sleep time. Use HH:mm, for example 00:00 or 23:00.");
-        }
+            String msg = "Scheduled " + result.getScheduledEvents().size() + " goal sessions.";
+            if (!result.getUnscheduledNotes().isEmpty()) {
+                msg = msg + " " + String.join(" ", result.getUnscheduledNotes());
+            }
+            publishStatus(msg);
+        });
+        task.setOnFailed(ev -> publishStatus("Scheduling failed."));
+        startDaemon(task, "week-scheduler");
     }
 
-    private void handleImportFile() {
+    public void importIcsFile() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Import .ics Calendar");
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("iCalendar files (*.ics)", "*.ics"));
@@ -311,19 +274,35 @@ public class CalendarTabView extends BorderPane {
         if (file == null) {
             return;
         }
-        try {
-            IcsImportSummary summary = service.importIcsFile(file.toPath());
+        publishStatus("Importing " + file.getName() + "...");
+        Task<IcsImportSummary> task = new Task<>() {
+            @Override
+            protected IcsImportSummary call() throws Exception {
+                return service.importIcsFile(file.toPath());
+            }
+        };
+        task.setOnSucceeded(ev -> {
             refreshView();
-            statusLabel.setText(formatImportSummary(summary));
-        } catch (IOException ex) {
-            statusLabel.setText("Import failed: " + ex.getMessage());
-        }
+            publishStatus(formatImportSummary(task.getValue()));
+        });
+        task.setOnFailed(ev -> {
+            Throwable err = task.getException();
+            if (err != null) {
+                publishStatus("Import failed: " + err.getMessage());
+            } else {
+                publishStatus("Import failed.");
+            }
+        });
+        startDaemon(task, "ics-import");
     }
 
-    private void handlePasteIcs() {
+    public void pasteIcsText(UiTheme currentTheme) {
         Dialog<String> dialog = new Dialog<>();
+        dialog.initOwner(getScene().getWindow());
         dialog.setTitle("Paste .ics Text");
         dialog.setHeaderText("Paste raw iCalendar (.ics) content below:");
+        applyDialogTheme(dialog.getDialogPane(), currentTheme);
+
         TextArea area = new TextArea();
         area.setPrefRowCount(14);
         area.setPrefColumnCount(56);
@@ -338,13 +317,24 @@ public class CalendarTabView extends BorderPane {
 
         Optional<String> pasted = dialog.showAndWait();
         if (pasted.isPresent()) {
-            IcsImportSummary summary = service.importIcsText(pasted.get());
-            refreshView();
-            statusLabel.setText(formatImportSummary(summary));
+            String rawText = pasted.get();
+            publishStatus("Importing pasted .ics...");
+            Task<IcsImportSummary> task = new Task<>() {
+                @Override
+                protected IcsImportSummary call() {
+                    return service.importIcsText(rawText);
+                }
+            };
+            task.setOnSucceeded(ev -> {
+                refreshView();
+                publishStatus(formatImportSummary(task.getValue()));
+            });
+            task.setOnFailed(ev -> publishStatus("Import failed."));
+            startDaemon(task, "ics-paste-import");
         }
     }
 
-    private void handleExportIcs() {
+    public void exportIcsFile() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Export Calendar to .ics");
         chooser.setInitialFileName("calendar-organizer.ics");
@@ -353,28 +343,46 @@ public class CalendarTabView extends BorderPane {
         if (file == null) {
             return;
         }
-        try {
-            service.exportIcsFile(file.toPath());
-            statusLabel.setText("Exported calendar to " + file.getAbsolutePath());
-        } catch (IOException ex) {
-            statusLabel.setText("Export failed: " + ex.getMessage());
-        }
+        publishStatus("Exporting .ics...");
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws Exception {
+                service.exportIcsFile(file.toPath());
+                return null;
+            }
+        };
+        task.setOnSucceeded(ev -> publishStatus("Exported calendar to " + file.getAbsolutePath()));
+        task.setOnFailed(ev -> {
+            Throwable err = task.getException();
+            if (err != null) {
+                publishStatus("Export failed: " + err.getMessage());
+            } else {
+                publishStatus("Export failed.");
+            }
+        });
+        startDaemon(task, "ics-export");
     }
 
-    private void shiftWeek(int deltaWeeks) {
+    public void shiftWeek(int deltaWeeks) {
         currentWeekStart = currentWeekStart.plusWeeks(deltaWeeks);
         refreshView();
     }
 
-    private void onEventClicked(CalendarEvent event) {
-        selectedEvent = event;
+    public void goToday() {
+        currentWeekStart = service.weekStartOf(LocalDate.now());
         refreshView();
     }
 
-    public void refreshView() {
+    public String getWeekRangeLabel() {
         LocalDate weekEnd = currentWeekStart.plusDays(6);
-        weekLabel.setText(currentWeekStart.format(WEEK_RANGE_FMT) + " - " + weekEnd.format(WEEK_RANGE_FMT) + ", " + weekEnd.getYear());
+        return currentWeekStart.format(WEEK_RANGE_FMT) + " – " + weekEnd.format(WEEK_RANGE_FMT) + ", " + weekEnd.getYear();
+    }
 
+    public String getLastStatus() {
+        return lastStatus;
+    }
+
+    public void refreshView() {
         List<CalendarEvent> events = service.getEventsForWeek(currentWeekStart);
         weekGridView.setWeekData(currentWeekStart, events, selectedEvent);
 
@@ -384,6 +392,32 @@ public class CalendarTabView extends BorderPane {
         sleepField.setText(prefs.getSleepTime().format(TIME_FMT));
 
         updateSelectedPanel();
+        if (onDataChanged != null) {
+            onDataChanged.run();
+        }
+    }
+
+    private void handleUpdateSleep() {
+        String raw = sleepField.getText();
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        try {
+            LocalTime parsed = LocalTime.parse(raw.trim(), TIME_FMT);
+            service.updateSleepTime(parsed);
+            if (!service.findAllGoals().isEmpty()) {
+                service.rescheduleWeek(currentWeekStart);
+            }
+            refreshView();
+            publishStatus("Sleep time updated to " + parsed.format(TIME_FMT));
+        } catch (DateTimeParseException ex) {
+            publishStatus("Invalid sleep time. Use HH:mm (for example 00:00 or 23:00).");
+        }
+    }
+
+    private void onEventClicked(CalendarEvent event) {
+        selectedEvent = event;
+        refreshView();
     }
 
     private void updateSelectedPanel() {
@@ -399,12 +433,39 @@ public class CalendarTabView extends BorderPane {
                 + selectedEvent.getStartTime().format(TIME_FMT) + " -> "
                 + selectedEvent.getEndTime().format(TIME_FMT));
         if (selectedEvent.getSource() == EventSource.RECURRING) {
-            selectedMetaLabel.setText("RECURRING occurrence (delete via Recurring Rules above)");
+            selectedMetaLabel.setText("Recurring occurrence (delete via Recurring Rules)");
             deleteEventButton.setDisable(true);
         } else {
             selectedMetaLabel.setText(selectedEvent.getCategory().name() + " / " + selectedEvent.getSource().name());
             deleteEventButton.setDisable(selectedEvent.getId() <= 0);
         }
+    }
+
+    private void publishStatus(String status) {
+        this.lastStatus = status;
+        if (onStatusChanged != null) {
+            onStatusChanged.accept(status);
+        }
+    }
+
+    private void startDaemon(Task<?> task, String name) {
+        Thread worker = new Thread(task, name);
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void applyDialogTheme(DialogPane pane, UiTheme theme) {
+        URL cssUrl = CalendarTabView.class.getResource("/styles.css");
+        if (cssUrl != null) {
+            String urlStr = cssUrl.toExternalForm();
+            if (!pane.getStylesheets().contains(urlStr)) {
+                pane.getStylesheets().add(urlStr);
+            }
+        }
+        for (UiTheme candidate : UiTheme.values()) {
+            pane.getStyleClass().remove(candidate.getStyleClass());
+        }
+        pane.getStyleClass().add(theme.getStyleClass());
     }
 
     private String formatDays(RecurringRule rule) {
@@ -427,19 +488,19 @@ public class CalendarTabView extends BorderPane {
             sb.append(", sleep updated");
         }
         if (res.getScheduleResult() != null) {
-            sb.append(". Scheduled ").append(res.getScheduleResult().getScheduledEvents().size()).append(" goal sessions.");
+            sb.append(" · Scheduled ").append(res.getScheduleResult().getScheduledEvents().size()).append(" blocks");
             if (!res.getScheduleResult().getUnscheduledNotes().isEmpty()) {
-                sb.append(" ").append(String.join(" ", res.getScheduleResult().getUnscheduledNotes()));
+                sb.append(" (").append(String.join(" ", res.getScheduleResult().getUnscheduledNotes())).append(")");
             }
         }
         if (!res.getParseResult().getWarnings().isEmpty()) {
-            sb.append(" Warnings: ").append(String.join("; ", res.getParseResult().getWarnings()));
+            sb.append(" · ").append(String.join("; ", res.getParseResult().getWarnings()));
         }
         return sb.toString();
     }
 
     private String formatImportSummary(IcsImportSummary summary) {
-        String text = "Imported " + summary.getImportedEvents() + " events and " + summary.getImportedRules() + " recurring rules.";
+        String text = "Imported " + summary.getImportedEvents() + " events and " + summary.getImportedRules() + " rules.";
         if (!summary.getWarnings().isEmpty()) {
             text = text + " Warnings: " + String.join("; ", summary.getWarnings());
         }
