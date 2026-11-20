@@ -24,7 +24,7 @@
     -fx-text-fill: -lc-text;
 }
 
-.theme-midnight {
+.root.theme-midnight, .dialog-pane.theme-midnight {
     -lc-chrome: #1e1e1e;
     -lc-canvas: #121212;
     -lc-grid-bg: #0c0c0c;
@@ -39,7 +39,7 @@
     -lc-hairline: #1c1c1c;
 }
 
-.theme-paper {
+.root.theme-paper, .dialog-pane.theme-paper {
     -lc-chrome: #fafafa;
     -lc-canvas: #ececec;
     -lc-grid-bg: #f8f8f8;
@@ -58,6 +58,27 @@
     -lc-accent: #0a62d0;
     -lc-danger: #c83434;
     -lc-caution: #b0761a;
+}
+
+.dialog-pane.theme-charcoal {
+    -lc-chrome: #2d2d2d;
+    -lc-canvas: #1c1c1c;
+    -lc-grid-bg: #161616;
+    -lc-inset: #232323;
+    -lc-field: #222222;
+    -lc-field-border: #3c3c3c;
+    -lc-button: #242424;
+    -lc-button-border: #4c4c4c;
+    -lc-hover: #3a3a3a;
+    -lc-active: #3f3f3f;
+    -lc-divider: #181818;
+    -lc-hairline: #272727;
+    -lc-text: #e2e2e2;
+    -lc-label: #bcbcbc;
+    -lc-dim: #8e8e8e;
+    -lc-accent: #0165dd;
+    -lc-danger: #e04a4a;
+    -lc-caution: #e3a83c;
 }
 
 .label {
