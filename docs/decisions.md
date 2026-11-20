@@ -44,3 +44,7 @@
 - **Decision**: Default `GeminiProvider` to `gemini-flash-lite-latest` (configurable via `GEMINI_MODEL`) and skip any `"thought": true` response parts when extracting JSON text.
 - **Reason**: `gemini-2.5-flash` returns HTTP 404 for new API keys on `generativelanguage.googleapis.com/v1beta`, whereas `gemini-flash-lite-latest` responds cleanly and quickly with structured JSON.
 
+## LightCraft-inspired UI chrome, themes, and memory footprint
+- **Decision**: Adopt a single-chrome top bar and bottom status/navigation bar with Charcoal (`#2d2d2d` / `#1c1c1c`), Midnight, and Paper themes; keep `WeekGridView` gridlines static with coalesced resize relayouts; run `.ics` imports/exports and database compaction on background threads; enable SQLite WAL with a 2 MB cache cap and indexes; and cap packaged JVM heap (`-Xms32m -Xmx256m` with `G1GC` 20ms pause target).
+- **Reason**: Keeps frame rendering smooth, minimizes memory footprint on Windows, and exposes one-click database compaction and calendar history/settings reset in `Settings` without ever touching course markdown folders on disk.
+

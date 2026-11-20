@@ -33,9 +33,9 @@
 
 ## Milestone 10: Windows jpackage Build, Final Docs, and Review (Completed)
 - **What works**:
-  - `scripts/package-windows.ps1` builds and packages `target/dist/CalendarOrganizer/CalendarOrganizer.exe` using JDK 21 `jpackage`.
+  - `scripts/package-windows.ps1` builds and packages `target/dist/CalendarOrganizer/CalendarOrganizer.exe` using JDK 21 `jpackage` with bounded `G1GC` heap flags (`-Xms32m -Xmx256m`).
+  - LightCraft-inspired single-chrome UI (`MainWindow`, `SettingsDialog`, `UiTheme` with Charcoal/Midnight/Paper themes), static-grid coalesced `WeekGridView`, SQLite WAL + indexes + compaction (`VACUUM` / `PRAGMA optimize`), and one-click reset of calendar history and settings.
   - Both `mvn javafx:run` and the packaged `CalendarOrganizer.exe` launch on Windows cleanly.
-  - All 35 JUnit 5 tests pass after the final edits.
-  - Documentation (`README.md`, `docs/architecture.md`, `docs/decisions.md`, `docs/progress.md`) matches the implemented codebase.
+  - All 36 JUnit 5 tests pass.
 - **What's next**:
   - Ready for everyday use; set `$env:GEMINI_API_KEY` or run local Ollama optionally for LLM sentence parsing.

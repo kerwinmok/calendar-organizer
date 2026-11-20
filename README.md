@@ -5,6 +5,13 @@ A local-first Windows desktop app in two parts:
 1. **Calendar Builder**: Enter plain sentences like `"i work mon-thurs 7-6pm"` or `"i want to work out and study, i'm busy at 8pm for 2 hours, and i want to sleep at 12"`. Fixed blocks, recurring blocks, sleep hours, and workout/study goals are saved locally in SQLite and scheduled deterministically without overlaps. Supports importing Google Calendar `.ics` exports (from file or pasted text) and exporting back to `.ics`.
 2. **Course Organizer**: Organizes courses numerically by course number (for example `MATH 99`, `CMPT 201`, `STAT 201`, `CMPT 1000`) with real disk folders and markdown files (`courses/CMPT-201/lectures/lecture-01.md`, `notes/`, `coursework/`). Exports a single course or all courses into a `.zip` of clean markdown (`README.md`, normalized per-section `.md` files, and `combined.md`) ready to pass to another LLM for studying.
 
+## UI Themes, Cleanup & Settings
+
+Open **Settings** from the top-right bar to:
+- Switch themes live between **Charcoal (Dark)** (default), **Midnight (OLED Dark)**, and **Paper (Light)**.
+- Inspect live SQLite counts, database disk size, and memory usage.
+- Run **Clear Past Events**, **Clear Scheduled Sessions**, **Optimize & Compact Database** (`VACUUM` + `PRAGMA optimize`), or **Reset All Calendar History & Settings** (which leaves your course markdown folders untouched).
+
 ## Requirements
 
 - Windows 10 or Windows 11 (x64)

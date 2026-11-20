@@ -13,8 +13,9 @@
   - `ScheduleGoal`, `GoalType`, `SchedulePreferences`: workout/study targets and sleep window settings.
 - `com.calendarorganizer.storage`
   - `AppPaths`: resolves `%USERPROFILE%\.calendar-organizer` (with property and environment overrides).
-  - `DatabaseManager`: initializes SQLite tables (`events`, `recurring_rules`, `goals`, `preferences`).
-  - `CalendarRepository`: CRUD, UID upsert for `.ics` imports, ISO-8601 range queries, and preference storage.
+  - `DatabaseManager`: configures SQLite WAL mode, 2 MB cache cap (`cache_size = -2000`), in-memory temp store, and event range/source indexes (`idx_events_time`, `idx_events_source`).
+  - `CalendarRepository`: CRUD, UID upsert for `.ics` imports, ISO-8601 range queries, preference/theme persistence, past-event cleanup, full calendar reset, and `VACUUM`/`PRAGMA optimize` compaction.
+  - `StorageStats`: immutable count and SQLite database byte-size snapshot.
 - `com.calendarorganizer.ics`
   - `IcsParser`, `IcsParseResult`: parses `.ics` files and pasted text (`DTSTART`, `DTEND`, `DURATION`, `UTC`/`TZID`/`VALUE=DATE`, line unfolding, text unescaping, weekly `RRULE`).
   - `IcsExporter`: writes RFC 5545 CRLF `.ics` output with escaping and 75-character line folding.
@@ -34,9 +35,11 @@
   - `Course`, `CourseSection`, `CourseItem`, `CourseManager`: disk-backed course folders sorted numerically by course number, with safe file naming and natural markdown sorting.
   - `CourseExporter`: exports one course or all courses to a `.zip` with normalized `.md` files, `README.md`, and `combined.md`.
 - `com.calendarorganizer.ui`
-  - `MainWindow`: top-level `TabPane` hosting `CalendarTabView` and `CourseTabView`.
-  - `CalendarTabView`, `WeekGridView`: 7-day x 24-hour calendar view, sentence bar, `.ics` dialogs, and sidebar controls.
-  - `CourseTabView`: three-pane course list, section tabs (`Lectures`, `Notes`, `Coursework`), markdown editor, and `.zip` export buttons.
+  - `UiTheme`: `CHARCOAL` (default dark), `MIDNIGHT` (near-black dark), and `PAPER` (light) theme definitions.
+  - `MainWindow`: unified LightCraft-inspired chrome with top command bar, bottom status/navigation bar, collapsible panels, and `Calendar`/`Courses` mode switching.
+  - `CalendarTabView`, `WeekGridView`: 7-day x 24-hour calendar canvas with static hour gridlines, coalesced resize relayout, smooth wheel scrolling, current-time indicator, `.ics` background tasks, and collapsible right inspector.
+  - `CourseTabView`: three-pane course list with top-bar filtering, segmented section switch (`Lectures`, `Notes`, `Coursework`), markdown editor, and background `.zip` exports.
+  - `SettingsDialog`: theme switcher, storage and JVM memory readout, `Clear Past Events`, `Clear Scheduled Sessions`, `Optimize & Compact Database`, and `Reset All Calendar History & Settings`.
 
 ## Data Flow
 1. **Calendar Input -> Schedule**: Sentence input -> `CalendarService.applySentence` -> `ScheduleParserService` (`GeminiProvider` / `OllamaProvider` / `RuleParser`) -> `ParseResultMapper` -> SQLite (`CalendarRepository`) -> `Scheduler.scheduleWeek` -> non-overlapping `SCHEDULED` events persisted -> `WeekGridView` refreshes.
