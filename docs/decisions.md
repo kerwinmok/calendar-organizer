@@ -15,3 +15,7 @@
 ## Default sleep duration
 - **Decision**: Default sleep duration to 7 hours starting at the configured `sleepTime` (default `23:00`).
 - **Reason**: Saying "sleep at 12" maps to `00:00`–`07:00`, which aligns cleanly with a 7:00 AM workday start.
+
+## Default goal targets when quantities are omitted
+- **Decision**: When a user writes `"i want to work out and study"` without numbers, default workout goals to 3 sessions per week of 60 minutes, and study goals to 5 sessions per week of 90 minutes (450 minutes/week).
+- **Reason**: Gives sensible weekly totals out of the box while allowing explicit quantities (`"4 times a week for 45 minutes"`, `"10 hours a week"`) to override them.

@@ -10,9 +10,14 @@
 - `DatabaseManager` and `CalendarRepository` persist and query events, recurring rules, goals, and preferences in SQLite.
 
 ## Milestone 3: ICS Import and Export (Completed)
+- `IcsParser` supports `.ics` files and pasted text with UTC/`TZID`/date handling, `DURATION`, line unfolding, and weekly `RRULE`.
+- `IcsExporter` produces RFC 5545 output with escaping and 75-character folding, verified by round-trip tests.
+
+## Milestone 4: Rule-Based Parser for Schedule Phrases (Completed)
 - **What works**:
-  - `IcsParser` supports both `.ics` files and pasted text, RFC 5545 line unfolding, text unescaping, UTC/`TZID`/floating/`VALUE=DATE` timestamps, `DURATION` fallback, and weekly `RRULE` (`BYDAY`, `UNTIL`).
-  - `IcsExporter` emits valid RFC 5545 CRLF output with text escaping, 75-character line folding, single events, and weekly `RRULE` rules.
-  - `IcsParserTest` and `IcsExporterTest` pass including full export/re-parse round-trips.
+  - `ParsedEvent`, `ParsedRecurringRule`, `ParsedGoal`, `ParseResult`, and `ParseResultMapper`.
+  - `DayParser` handles ranges (`mon-thurs`), slash lists (`m/w/f`), `weekdays`/`weekends`/`daily`, and relative days (`today`, `tomorrow`).
+  - `TimeRangeParser` handles shorthand ranges (`7-6pm`, `9-5`, `2-4pm`), overnight shifts (`10pm-6am`), `at X for Y hours/minutes`, and sleep times (`sleep at 12`, `sleep at 11`, `sleep at 1am`).
+  - `RuleParser` parses multi-clause sentences into recurring blocks, fixed events, workout/study goals, and sleep preferences with `RuleParserTest` passing.
 - **What's next**:
-  - Milestone 4: Rule-based parser for natural language schedule phrases with unit tests.
+  - Milestone 5: `LlmProvider` interface with `OllamaProvider`, `GeminiProvider`, and fallback orchestration.
