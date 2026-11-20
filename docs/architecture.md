@@ -14,7 +14,7 @@
 - `com.calendarorganizer.storage`
   - `AppPaths`: resolves `%USERPROFILE%\.calendar-organizer` (with property and environment overrides).
   - `DatabaseManager`: configures SQLite WAL mode, 2 MB cache cap (`cache_size = -2000`), in-memory temp store, and event range/source indexes (`idx_events_time`, `idx_events_source`).
-  - `CalendarRepository`: CRUD, UID upsert for `.ics` imports, ISO-8601 range queries, preference/theme persistence, past-event cleanup, full calendar reset, and `VACUUM`/`PRAGMA optimize` compaction.
+  - `CalendarRepository`: CRUD, UID upsert for `.ics` imports, ISO-8601 range queries, generic key/value preference persistence (theme, Gemini key, Ollama host/model), past-event cleanup, full calendar reset, and `VACUUM`/`PRAGMA optimize` compaction.
   - `StorageStats`: immutable count and SQLite database byte-size snapshot.
 - `com.calendarorganizer.ics`
   - `IcsParser`, `IcsParseResult`: parses `.ics` files and pasted text (`DTSTART`, `DTEND`, `DURATION`, `UTC`/`TZID`/`VALUE=DATE`, line unfolding, text unescaping, weekly `RRULE`).
@@ -24,8 +24,8 @@
   - `DayParser`, `TimeRangeParser`, `RuleParser`: offline rule-based parser for schedule sentences, ranges (`7-6pm`), relative dates, durations, goals, and sleep times.
 - `com.calendarorganizer.llm`
   - `LlmProvider`, `LlmException`, `LlmPromptBuilder`, `LlmJsonParser`: provider interface and JSON-only extraction layer.
-  - `OllamaProvider`: local Ollama HTTP client (`OLLAMA_HOST`, `OLLAMA_MODEL`).
-  - `GeminiProvider`: Gemini HTTP client reading `GEMINI_API_KEY` from environment.
+  - `OllamaProvider`: local Ollama HTTP client resolving saved preferences or `OLLAMA_HOST` / `OLLAMA_MODEL` dynamically.
+  - `GeminiProvider`: Gemini HTTP client resolving saved preferences or `GEMINI_API_KEY` / `GEMINI_MODEL` dynamically.
   - `ParserMode`, `ScheduleParserService`: routes `AUTO`, `RULES`, `OLLAMA`, and `GEMINI` modes with fallback to `RuleParser`.
 - `com.calendarorganizer.scheduler`
   - `TimeInterval`, `ScheduleResult`, `Scheduler`: deterministic Java scheduler that merges fixed events, expanded recurring rules, and sleep windows, then places workout and study sessions without overlaps.
@@ -39,7 +39,9 @@
   - `MainWindow`: unified LightCraft-inspired chrome with top command bar, bottom status/navigation bar, collapsible panels, and `Calendar`/`Courses` mode switching.
   - `CalendarTabView`, `WeekGridView`, `CalendarGridMath`, `EventDialog`, `EventFormValidator`: 7-day x 24-hour calendar canvas with `Ctrl + Scroll` zooming, static hour gridlines, coalesced resize relayout, smooth wheel scrolling, current-time indicator, drag-to-create on empty slots, drag-to-move/resize on event cards, manual event and recurring-rule editing dialogs with form validation, `.ics` background tasks, and collapsible right inspector.
   - `CourseTabView`: three-pane course list with top-bar filtering, segmented section switch (`Lectures`, `Notes`, `Coursework`), markdown editor with automatic flush on navigation/close, drag-and-drop and file-chooser attachment imports in the background, desktop open/folder navigation, and background `.zip` exports.
-  - `SettingsDialog`: theme switcher, storage and JVM memory readout, `Clear Past Events`, `Clear Scheduled Sessions`, `Optimize & Compact Database`, and `Reset All Calendar History & Settings`.
+  - `SettingsDialog`: theme switcher, optional in-app Gemini API key and Ollama configuration, storage and JVM memory readout, `Clear Past Events`, `Clear Scheduled Sessions`, `Optimize & Compact Database`, and `Reset All Calendar History & Settings`.
+- Windows Packaging (`packaging/windows` & `scripts/package-windows.ps1`)
+  - `SingleFileLauncher.cs` + `app-icon.ico`: compiles a standalone x64 WinForms stub with an appended compressed `jpackage` payload and 40-byte `CALORG01` footer into a single `target/dist/CalendarOrganizer.exe`, extracting once by content hash into `%LOCALAPPDATA%\CalendarOrganizer\app-<stamp>`, supporting optional `portable.txt` / `calendar-organizer-data`, and launching directly from cache thereafter.
 
 ## Data Flow
 1. **Calendar Input -> Schedule**: Sentence input -> `CalendarService.applySentence` -> `ScheduleParserService` (`GeminiProvider` / `OllamaProvider` / `RuleParser`) -> `ParseResultMapper` -> SQLite (`CalendarRepository`) -> `Scheduler.scheduleWeek` -> non-overlapping `SCHEDULED` events persisted -> `WeekGridView` refreshes.

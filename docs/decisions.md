@@ -36,9 +36,13 @@
 - **Decision**: Export both individual normalized `.md` files under `<COURSE-FOLDER>/<section>/<file.md>` and a top-level `README.md` index plus a merged `combined.md` file inside each exported `.zip`.
 - **Reason**: Lets you upload either individual course files or a single combined markdown bundle directly into another LLM to study from, while stripping non-markdown files and normalizing line endings.
 
-## Windows packaging with jpackage app-image
-- **Decision**: Package the Windows distribution using `jpackage --type app-image` via `scripts/package-windows.ps1` rather than `--type msi` or `--type exe`.
-- **Reason**: WiX Toolset (`candle`/`light`/`wix`) is not required for `--type app-image`, so any machine with JDK 21 and Maven can immediately produce a runnable `CalendarOrganizer.exe` bundle. Users who install WiX can switch `--type` to `msi` in the script if an installer is desired.
+## All-in-one standalone Windows executable (`CalendarOrganizer.exe`)
+- **Decision**: Stage `jpackage --type app-image` into a compressed zip payload appended after a native `.NET Framework 4.x` (`csc.exe` x64 WinForms) stub executable with a 40-byte SHA-256-stamped footer (`CALORG01`), producing a single portable `target/dist/CalendarOrganizer.exe` (~45 MB) with custom icon (`app-icon.ico`).
+- **Reason**: Built-in Windows `.NET Framework 4.x` and JDK 21 `jpackage` work without requiring WiX, third-party installers, or admin rights; downloading a single `.exe` works anywhere, unpacks once into `%LOCALAPPDATA%\CalendarOrganizer\app-<stamp>`, launches straight from cache on subsequent runs (~0.4s overhead), exits the wrapper immediately so zero extra background processes stay open, and supports optional `portable.txt` beside the `.exe`.
+
+## Optional in-app AI settings with environment-variable fallback
+- **Decision**: Resolve the Gemini API key and Ollama host/model dynamically via suppliers in `GeminiProvider` and `OllamaProvider`, reading SQLite `preferences` first and falling back to `GEMINI_API_KEY`, `OLLAMA_HOST`, and `OLLAMA_MODEL` environment variables.
+- **Reason**: Users running the standalone `.exe` by double-clicking can optionally paste a Gemini API key or set Ollama settings inside **Settings** without opening PowerShell, while terminal/environment-variable workflows keep working unchanged.
 
 ## Default Gemini model
 - **Decision**: Default `GeminiProvider` to `gemini-flash-lite-latest` (configurable via `GEMINI_MODEL`) and skip any `"thought": true` response parts when extracting JSON text.
