@@ -14,10 +14,13 @@
 - `IcsExporter` produces RFC 5545 output with escaping and 75-character folding, verified by round-trip tests.
 
 ## Milestone 4: Rule-Based Parser for Schedule Phrases (Completed)
+- `DayParser`, `TimeRangeParser`, `RuleParser`, and `ParseResultMapper` parse plain schedule phrases offline.
+
+## Milestone 5: LLM Provider Interface, Ollama, and Gemini (Completed)
 - **What works**:
-  - `ParsedEvent`, `ParsedRecurringRule`, `ParsedGoal`, `ParseResult`, and `ParseResultMapper`.
-  - `DayParser` handles ranges (`mon-thurs`), slash lists (`m/w/f`), `weekdays`/`weekends`/`daily`, and relative days (`today`, `tomorrow`).
-  - `TimeRangeParser` handles shorthand ranges (`7-6pm`, `9-5`, `2-4pm`), overnight shifts (`10pm-6am`), `at X for Y hours/minutes`, and sleep times (`sleep at 12`, `sleep at 11`, `sleep at 1am`).
-  - `RuleParser` parses multi-clause sentences into recurring blocks, fixed events, workout/study goals, and sleep preferences with `RuleParserTest` passing.
+  - `LlmProvider` interface, `LlmPromptBuilder`, `LlmJsonParser`, and `LlmException`.
+  - `OllamaProvider` (`OLLAMA_HOST`, `OLLAMA_MODEL`) and `GeminiProvider` (`GEMINI_API_KEY`, `GEMINI_MODEL`).
+  - `ScheduleParserService` with `ParserMode` (`AUTO`, `RULES`, `OLLAMA`, `GEMINI`) and automatic fallback to `RuleParser`.
+  - `LlmJsonParserTest`, `OllamaProviderTest`, `GeminiProviderTest`, and `ScheduleParserServiceTest` pass using local HTTP server stubs.
 - **What's next**:
-  - Milestone 5: `LlmProvider` interface with `OllamaProvider`, `GeminiProvider`, and fallback orchestration.
+  - Milestone 6: Deterministic `Scheduler` for workout, study, sleep, and fixed/recurring events with edge-case unit tests.
