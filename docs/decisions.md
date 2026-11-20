@@ -36,3 +36,7 @@
 - **Decision**: Export both individual normalized `.md` files under `<COURSE-FOLDER>/<section>/<file.md>` and a top-level `README.md` index plus a merged `combined.md` file inside each exported `.zip`.
 - **Reason**: Lets you upload either individual course files or a single combined markdown bundle directly into another LLM to study from, while stripping non-markdown files and normalizing line endings.
 
+## Windows packaging with jpackage app-image
+- **Decision**: Package the Windows distribution using `jpackage --type app-image` via `scripts/package-windows.ps1` rather than `--type msi` or `--type exe`.
+- **Reason**: WiX Toolset (`candle`/`light`/`wix`) is not required for `--type app-image`, so any machine with JDK 21 and Maven can immediately produce a runnable `CalendarOrganizer.exe` bundle. Users who install WiX can switch `--type` to `msi` in the script if an installer is desired.
+

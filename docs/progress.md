@@ -29,9 +29,13 @@
 - `Course`, `CourseSection`, `CourseItem`, `CourseManager`, and `CourseTabView` store courses by course number with lectures, notes, and coursework markdown files.
 
 ## Milestone 9: Zip and Markdown Export (Completed)
+- `CourseExporter` exports a single course or all courses into a `.zip` archive with normalized `.md` files, `README.md`, and `combined.md`, wired into `CourseTabView`.
+
+## Milestone 10: Windows jpackage Build, Final Docs, and Review (Completed)
 - **What works**:
-  - `CourseExporter` exports a single course or all courses into a `.zip` archive with normalized LF markdown, `README.md` index, and merged `combined.md`, skipping non-markdown files.
-  - `Export Course (.zip)` and `Export All (.zip)` buttons are wired in `CourseTabView`.
-  - `CourseExporterTest` verifies single-course export, multi-course numeric sort order, empty-course handling, and markdown normalization.
+  - `scripts/package-windows.ps1` builds and packages `target/dist/CalendarOrganizer/CalendarOrganizer.exe` using JDK 21 `jpackage`.
+  - Both `mvn javafx:run` and the packaged `CalendarOrganizer.exe` launch on Windows cleanly.
+  - All 35 JUnit 5 tests pass after the final edits.
+  - Documentation (`README.md`, `docs/architecture.md`, `docs/decisions.md`, `docs/progress.md`) matches the implemented codebase.
 - **What's next**:
-  - Milestone 10: Windows `jpackage` build script, executable smoke test, final docs polish, and full verification review.
+  - Ready for everyday use; set `$env:GEMINI_API_KEY` or run local Ollama optionally for LLM sentence parsing.
