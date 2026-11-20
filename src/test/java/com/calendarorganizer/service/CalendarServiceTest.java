@@ -14,6 +14,7 @@ import com.calendarorganizer.parser.RuleParser;
 import com.calendarorganizer.scheduler.Scheduler;
 import com.calendarorganizer.storage.CalendarRepository;
 import com.calendarorganizer.storage.DatabaseManager;
+import com.calendarorganizer.storage.StorageStats;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -95,5 +96,20 @@ class CalendarServiceTest {
                 .filter(e -> e.getSource() == EventSource.SCHEDULED)
                 .count();
         assertEquals(0L, remainingScheduled);
+
+        service.saveTheme("paper");
+        assertEquals("paper", service.loadTheme());
+
+        StorageStats stats = service.optimizeAndCompact();
+        assertTrue(stats.getDatabaseBytes() > 0L);
+
+        int removedPast = service.clearPastEvents(MONDAY.plusDays(7));
+        assertTrue(removedPast >= 1);
+        assertEquals(0, service.getStorageStats().getEventCount());
+
+        StorageStats resetStats = service.resetCalendarHistoryAndSettings();
+        assertEquals(0, resetStats.getEventCount());
+        assertEquals(0, resetStats.getRecurringRuleCount());
+        assertEquals(0, resetStats.getGoalCount());
     }
 }

@@ -18,10 +18,13 @@ import com.calendarorganizer.parser.RuleParser;
 import com.calendarorganizer.scheduler.ScheduleResult;
 import com.calendarorganizer.scheduler.Scheduler;
 import com.calendarorganizer.storage.CalendarRepository;
+import com.calendarorganizer.storage.StorageStats;
 
 import java.io.IOException;
+import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.temporal.TemporalAdjusters;
@@ -39,13 +42,28 @@ public class CalendarService {
     private final IcsExporter icsExporter;
 
     public CalendarService(CalendarRepository repository) {
+        this(repository, createSharedParserService());
+    }
+
+    private CalendarService(CalendarRepository repository, ScheduleParserService parserService) {
         this(
                 repository,
-                new ScheduleParserService(new RuleParser(), new OllamaProvider(), new GeminiProvider()),
+                parserService,
                 new ParseResultMapper(),
                 new Scheduler(),
                 new IcsParser(),
                 new IcsExporter()
+        );
+    }
+
+    private static ScheduleParserService createSharedParserService() {
+        HttpClient sharedClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(3))
+                .build();
+        return new ScheduleParserService(
+                new RuleParser(),
+                new OllamaProvider(sharedClient),
+                new GeminiProvider(sharedClient)
         );
     }
 
@@ -194,5 +212,29 @@ public class CalendarService {
 
     public void clearScheduledEvents() {
         repository.deleteEventsBySource(EventSource.SCHEDULED);
+    }
+
+    public int clearPastEvents(LocalDate beforeDate) {
+        return repository.deleteEventsEndingBefore(beforeDate.atStartOfDay());
+    }
+
+    public StorageStats resetCalendarHistoryAndSettings() {
+        return repository.clearAllCalendarData();
+    }
+
+    public StorageStats getStorageStats() {
+        return repository.getStorageStats();
+    }
+
+    public StorageStats optimizeAndCompact() {
+        return repository.optimizeDatabase();
+    }
+
+    public String loadTheme() {
+        return repository.loadTheme();
+    }
+
+    public void saveTheme(String themeId) {
+        repository.saveTheme(themeId);
     }
 }

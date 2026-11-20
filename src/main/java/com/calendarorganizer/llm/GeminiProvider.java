@@ -27,10 +27,14 @@ public class GeminiProvider implements LlmProvider {
     private final LlmJsonParser jsonParser;
 
     public GeminiProvider() {
+        this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+    }
+
+    public GeminiProvider(HttpClient httpClient) {
         this(System.getenv("GEMINI_API_KEY"),
                 readEnv("GEMINI_MODEL", DEFAULT_MODEL),
                 DEFAULT_BASE_URL,
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+                httpClient);
     }
 
     public GeminiProvider(String apiKey, String model, String baseUrl, HttpClient httpClient) {

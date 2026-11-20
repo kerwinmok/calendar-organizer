@@ -25,9 +25,13 @@ public class OllamaProvider implements LlmProvider {
     private final LlmJsonParser jsonParser;
 
     public OllamaProvider() {
+        this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
+    }
+
+    public OllamaProvider(HttpClient httpClient) {
         this(readEnv("OLLAMA_HOST", DEFAULT_HOST),
                 readEnv("OLLAMA_MODEL", DEFAULT_MODEL),
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
+                httpClient);
     }
 
     public OllamaProvider(String host, String model, HttpClient httpClient) {
