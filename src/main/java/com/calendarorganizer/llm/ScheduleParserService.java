@@ -33,7 +33,7 @@ public class ScheduleParserService {
         }
 
         if (effectiveMode == ParserMode.GEMINI) {
-            ParseResult result = tryProvider(geminiProvider, input, referenceDate, extraWarnings);
+            ParseResult result = tryProvider(geminiProvider, input, referenceDate, extraWarnings, true);
             if (result != null) {
                 return result;
             }
@@ -41,24 +41,20 @@ public class ScheduleParserService {
         }
 
         if (effectiveMode == ParserMode.OLLAMA) {
-            ParseResult result = tryProvider(ollamaProvider, input, referenceDate, extraWarnings);
+            ParseResult result = tryProvider(ollamaProvider, input, referenceDate, extraWarnings, true);
             if (result != null) {
                 return result;
             }
             return fallbackToRules(input, referenceDate, extraWarnings);
         }
 
-        if (geminiProvider.isAvailable()) {
-            ParseResult result = tryProvider(geminiProvider, input, referenceDate, extraWarnings);
-            if (result != null && !result.isEmpty()) {
-                return result;
-            }
+        ParseResult geminiResult = tryProvider(geminiProvider, input, referenceDate, extraWarnings, false);
+        if (geminiResult != null) {
+            return geminiResult;
         }
-        if (ollamaProvider.isAvailable()) {
-            ParseResult result = tryProvider(ollamaProvider, input, referenceDate, extraWarnings);
-            if (result != null && !result.isEmpty()) {
-                return result;
-            }
+        ParseResult ollamaResult = tryProvider(ollamaProvider, input, referenceDate, extraWarnings, false);
+        if (ollamaResult != null) {
+            return ollamaResult;
         }
         return fallbackToRules(input, referenceDate, extraWarnings);
     }
@@ -66,9 +62,12 @@ public class ScheduleParserService {
     private ParseResult tryProvider(LlmProvider provider,
                                     String input,
                                     LocalDate referenceDate,
-                                    List<String> extraWarnings) {
+                                    List<String> extraWarnings,
+                                    boolean recordUnavailable) {
         if (!provider.isAvailable()) {
-            extraWarnings.add(provider.getName() + " is not available; used rule parser.");
+            if (recordUnavailable) {
+                extraWarnings.add(provider.getName() + " is not available; used rule parser.");
+            }
             return null;
         }
         try {

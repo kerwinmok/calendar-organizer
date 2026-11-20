@@ -44,10 +44,37 @@ public class CalendarRepository {
     }
 
     public CalendarEvent saveEvent(CalendarEvent event) {
+        try (Connection conn = dbManager.openConnection()) {
+            return insertEvent(conn, event);
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to save event", e);
+        }
+    }
+
+    public void saveEvents(List<CalendarEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        try (Connection conn = dbManager.openConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                for (CalendarEvent event : events) {
+                    insertEvent(conn, event);
+                }
+                conn.commit();
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to batch save events", e);
+        }
+    }
+
+    private CalendarEvent insertEvent(Connection conn, CalendarEvent event) throws SQLException {
         String sql = "INSERT INTO events (uid, title, start_time, end_time, category, source, notes) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection conn = dbManager.openConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, event.getUid());
             ps.setString(2, event.getTitle());
             ps.setString(3, event.getStartTime().format(DT_FORMAT));
@@ -62,15 +89,40 @@ public class CalendarRepository {
                 }
             }
             return event;
-        } catch (SQLException e) {
-            throw new IllegalStateException("failed to save event", e);
         }
     }
 
     public CalendarEvent upsertEventByUid(CalendarEvent event) {
+        try (Connection conn = dbManager.openConnection()) {
+            return upsertEventOnConnection(conn, event);
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to upsert event", e);
+        }
+    }
+
+    public void upsertEventsByUid(List<CalendarEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        try (Connection conn = dbManager.openConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                for (CalendarEvent event : events) {
+                    upsertEventOnConnection(conn, event);
+                }
+                conn.commit();
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to batch upsert events", e);
+        }
+    }
+
+    private CalendarEvent upsertEventOnConnection(Connection conn, CalendarEvent event) throws SQLException {
         String findSql = "SELECT id FROM events WHERE uid = ?";
-        try (Connection conn = dbManager.openConnection();
-             PreparedStatement findPs = conn.prepareStatement(findSql)) {
+        try (PreparedStatement findPs = conn.prepareStatement(findSql)) {
             findPs.setString(1, event.getUid());
             try (ResultSet rs = findPs.executeQuery()) {
                 if (rs.next()) {
@@ -79,10 +131,8 @@ public class CalendarRepository {
                     return event.withId(existingId);
                 }
             }
-        } catch (SQLException e) {
-            throw new IllegalStateException("failed to upsert event", e);
         }
-        return saveEvent(event);
+        return insertEvent(conn, event);
     }
 
     private void updateExistingEvent(Connection conn, long id, CalendarEvent event) throws SQLException {
@@ -171,11 +221,38 @@ public class CalendarRepository {
     }
 
     public RecurringRule saveRecurringRule(RecurringRule rule) {
+        try (Connection conn = dbManager.openConnection()) {
+            return insertRecurringRule(conn, rule);
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to save recurring rule", e);
+        }
+    }
+
+    public void saveRecurringRules(List<RecurringRule> rules) {
+        if (rules == null || rules.isEmpty()) {
+            return;
+        }
+        try (Connection conn = dbManager.openConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                for (RecurringRule rule : rules) {
+                    insertRecurringRule(conn, rule);
+                }
+                conn.commit();
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to batch save recurring rules", e);
+        }
+    }
+
+    private RecurringRule insertRecurringRule(Connection conn, RecurringRule rule) throws SQLException {
         String sql = "INSERT INTO recurring_rules "
                 + "(title, days_of_week, start_time, end_time, category, start_date, end_date) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection conn = dbManager.openConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, rule.getTitle());
             ps.setString(2, encodeDays(rule.getDaysOfWeek()));
             ps.setString(3, rule.getStartTime().format(TIME_FORMAT));
@@ -198,8 +275,6 @@ public class CalendarRepository {
                 }
             }
             return rule;
-        } catch (SQLException e) {
-            throw new IllegalStateException("failed to save recurring rule", e);
         }
     }
 
@@ -404,10 +479,21 @@ public class CalendarRepository {
     }
 
     public StorageStats getStorageStats() {
-        try (Connection conn = dbManager.openConnection(); Statement stmt = conn.createStatement()) {
-            int events = queryCount(stmt, "SELECT COUNT(*) FROM events");
-            int rules = queryCount(stmt, "SELECT COUNT(*) FROM recurring_rules");
-            int goals = queryCount(stmt, "SELECT COUNT(*) FROM goals");
+        String sql = "SELECT "
+                + "(SELECT COUNT(*) FROM events), "
+                + "(SELECT COUNT(*) FROM recurring_rules), "
+                + "(SELECT COUNT(*) FROM goals)";
+        try (Connection conn = dbManager.openConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            int events = 0;
+            int rules = 0;
+            int goals = 0;
+            if (rs.next()) {
+                events = rs.getInt(1);
+                rules = rs.getInt(2);
+                goals = rs.getInt(3);
+            }
             long bytes = computeDatabaseBytes();
             return new StorageStats(events, rules, goals, bytes);
         } catch (SQLException e) {
@@ -424,15 +510,6 @@ public class CalendarRepository {
             throw new IllegalStateException("failed to optimize database", e);
         }
         return getStorageStats();
-    }
-
-    private int queryCount(Statement stmt, String sql) throws SQLException {
-        try (ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) {
-                return rs.getInt(1);
-            }
-            return 0;
-        }
     }
 
     private long computeDatabaseBytes() {
