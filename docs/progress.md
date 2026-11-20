@@ -23,10 +23,13 @@
 - `TimeInterval` and `Scheduler` place workout and study sessions deterministically around fixed blocks, recurring rules, midnight-crossing events, and sleep hours.
 
 ## Milestone 7: Calendar UI (Completed)
+- `CalendarService`, `WeekGridView`, `CalendarTabView`, and `MainWindow` deliver week rendering, sentence input, `.ics` import/export, and sidebar management.
+
+## Milestone 8: Course Organizer (Completed)
 - **What works**:
-  - `CalendarService` coordinates parsing, SQLite storage, automatic rescheduling, and `.ics` import/export, covered by `CalendarServiceTest`.
-  - `WeekGridView` renders a 7-day Mon–Sun 24-hour calendar grid with color-coded event blocks, midnight split rendering, and side-by-side overlap layout.
-  - `CalendarTabView` provides the sentence input bar (`Auto`/`Rules`/`Ollama`/`Gemini`), week navigation, `.ics` file import, paste-`.ics` modal dialog, `.ics` export, sleep editor, rules/goals management, and selected-event deletion.
-  - `MainWindow` and `MainApp` launch cleanly on Windows.
+  - `Course`, `CourseSection`, `CourseItem`, and `CourseManager` store courses as real directories and markdown files under `<dataDir>/courses/`.
+  - Courses sort numerically by course number, and markdown items sort naturally (`lecture-01.md`, `lecture-2.md`, `lecture-10.md`).
+  - `CourseTabView` provides a three-pane course browser, section tabs (`Lectures`, `Notes`, `Coursework`), and a live markdown editor with `Ctrl+S` save.
+  - `CourseManagerTest` passes with folder verification, numeric sorting, natural item sorting, CRUD, and path-traversal checks.
 - **What's next**:
-  - Milestone 8: Course organizer with numeric course sorting and disk-backed markdown lectures, notes, and coursework.
+  - Milestone 9: Zip and clean markdown export (`CourseExporter`) wired into `CourseTabView`.
