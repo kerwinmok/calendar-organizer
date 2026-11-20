@@ -231,9 +231,7 @@ public class CalendarTabView extends BorderPane {
         }
         ParserMode mode = parserModeBox.getValue();
         LocalDate refDate = LocalDate.now();
-        if (!refDate.isBefore(currentWeekStart) && !refDate.isAfter(currentWeekStart.plusDays(6))) {
-            //keep today as reference date when viewing current week
-        } else {
+        if (refDate.isBefore(currentWeekStart) || refDate.isAfter(currentWeekStart.plusDays(6))) {
             refDate = currentWeekStart;
         }
         LocalDate effectiveRef = refDate;
