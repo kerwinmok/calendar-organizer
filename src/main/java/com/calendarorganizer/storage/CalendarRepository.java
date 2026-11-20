@@ -153,6 +153,19 @@ public class CalendarRepository {
         }
     }
 
+    public void deleteScheduledEventsInRange(LocalDateTime rangeStart, LocalDateTime rangeEnd) {
+        String sql = "DELETE FROM events WHERE source = ? AND start_time < ? AND end_time > ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, EventSource.SCHEDULED.name());
+            ps.setString(2, rangeEnd.format(DT_FORMAT));
+            ps.setString(3, rangeStart.format(DT_FORMAT));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to delete scheduled events in range", e);
+        }
+    }
+
     public RecurringRule saveRecurringRule(RecurringRule rule) {
         String sql = "INSERT INTO recurring_rules "
                 + "(title, days_of_week, start_time, end_time, category, start_date, end_date) "
