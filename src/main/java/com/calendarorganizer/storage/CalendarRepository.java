@@ -101,6 +101,9 @@ public class CalendarRepository {
     }
 
     public void updateEvent(CalendarEvent event) {
+        if (event.getId() <= 0) {
+            throw new IllegalArgumentException("event id must be positive");
+        }
         try (Connection conn = dbManager.openConnection()) {
             updateExistingEvent(conn, event.getId(), event);
         } catch (SQLException e) {
@@ -314,6 +317,9 @@ public class CalendarRepository {
     }
 
     public void updateRecurringRule(RecurringRule rule) {
+        if (rule.getId() <= 0) {
+            throw new IllegalArgumentException("recurring rule id must be positive");
+        }
         String sql = "UPDATE recurring_rules SET title = ?, days_of_week = ?, start_time = ?, "
                 + "end_time = ?, category = ?, start_date = ?, end_date = ? WHERE id = ?";
         try (Connection conn = dbManager.openConnection();

@@ -257,9 +257,9 @@ public class MainWindow extends BorderPane {
         String text = sentenceField.getText();
         ParserMode mode = parserModeBox.getValue();
         addSentenceBtn.setDisable(true);
-        calendarTabView.submitSentence(text, mode, () -> {
+        calendarTabView.submitSentence(text, mode, succeeded -> {
             addSentenceBtn.setDisable(false);
-            if (text != null && !text.isBlank()) {
+            if (Boolean.TRUE.equals(succeeded)) {
                 sentenceField.clear();
             }
         });
@@ -272,6 +272,7 @@ public class MainWindow extends BorderPane {
                 activeTheme,
                 this::applyTheme,
                 () -> {
+                    calendarTabView.clearSelection();
                     calendarTabView.refreshView();
                     refreshFooter();
                 },

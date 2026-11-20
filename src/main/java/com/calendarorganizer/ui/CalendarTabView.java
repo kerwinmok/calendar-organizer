@@ -34,7 +34,6 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -130,6 +129,7 @@ public class CalendarTabView extends BorderPane {
             RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
             if (rule != null) {
                 service.deleteRecurringRule(rule.getId());
+                selectedEvent = null;
                 refreshView();
                 publishStatus("Deleted rule: " + rule.getTitle());
             }
@@ -157,10 +157,7 @@ public class CalendarTabView extends BorderPane {
         deleteGoalBtn.setOnAction(e -> {
             ScheduleGoal goal = goalsList.getSelectionModel().getSelectedItem();
             if (goal != null) {
-                service.deleteGoal(goal.getId());
-                service.rescheduleWeek(currentWeekStart);
-                refreshView();
-                publishStatus("Deleted goal: " + goal.getTitle());
+                handleDeleteGoal(goal);
             }
         });
         VBox goalsBox = new VBox(6, goalsList, deleteGoalBtn);
@@ -277,6 +274,7 @@ public class CalendarTabView extends BorderPane {
         if (updated.isPresent()) {
             RecurringRule saved = updated.get();
             service.updateRecurringRule(saved);
+            selectedEvent = null;
             refreshView();
             publishStatus("Updated recurring rule: " + saved.getTitle());
         }
@@ -319,11 +317,11 @@ public class CalendarTabView extends BorderPane {
         }
     }
 
-    public void submitSentence(String text, ParserMode mode, Runnable onFinished) {
+    public void submitSentence(String text, ParserMode mode, Consumer<Boolean> onFinished) {
         if (text == null || text.isBlank()) {
             publishStatus("Enter a schedule sentence first.");
             if (onFinished != null) {
-                onFinished.run();
+                onFinished.accept(false);
             }
             return;
         }
@@ -344,10 +342,13 @@ public class CalendarTabView extends BorderPane {
 
         task.setOnSucceeded(ev -> {
             ApplySentenceResult res = task.getValue();
+            if (selectedEvent != null && selectedEvent.getSource() == EventSource.SCHEDULED) {
+                selectedEvent = null;
+            }
             refreshView();
             publishStatus(formatApplySummary(res));
             if (onFinished != null) {
-                onFinished.run();
+                onFinished.accept(true);
             }
         });
 
@@ -359,23 +360,27 @@ public class CalendarTabView extends BorderPane {
                 publishStatus("Failed to parse sentence.");
             }
             if (onFinished != null) {
-                onFinished.run();
+                onFinished.accept(false);
             }
         });
 
-        startDaemon(task, "sentence-parser");
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     public void rescheduleCurrentWeek() {
+        LocalDate targetWeek = currentWeekStart;
         publishStatus("Scheduling week...");
         Task<ScheduleResult> task = new Task<>() {
             @Override
             protected ScheduleResult call() {
-                return service.rescheduleWeek(currentWeekStart);
+                return service.rescheduleWeek(targetWeek);
             }
         };
         task.setOnSucceeded(ev -> {
             ScheduleResult result = task.getValue();
+            if (selectedEvent != null && selectedEvent.getSource() == EventSource.SCHEDULED) {
+                selectedEvent = null;
+            }
             refreshView();
             String msg = "Scheduled " + result.getScheduledEvents().size() + " goal sessions.";
             if (!result.getUnscheduledNotes().isEmpty()) {
@@ -384,7 +389,7 @@ public class CalendarTabView extends BorderPane {
             publishStatus(msg);
         });
         task.setOnFailed(ev -> publishStatus("Scheduling failed."));
-        startDaemon(task, "week-scheduler");
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     public void importIcsFile() {
@@ -414,7 +419,7 @@ public class CalendarTabView extends BorderPane {
                 publishStatus("Import failed.");
             }
         });
-        startDaemon(task, "ics-import");
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     public void pasteIcsText() {
@@ -451,7 +456,7 @@ public class CalendarTabView extends BorderPane {
                 publishStatus(formatImportSummary(task.getValue()));
             });
             task.setOnFailed(ev -> publishStatus("Import failed."));
-            startDaemon(task, "ics-paste-import");
+            CalendarService.backgroundExecutor().execute(task);
         }
     }
 
@@ -481,7 +486,7 @@ public class CalendarTabView extends BorderPane {
                 publishStatus("Export failed.");
             }
         });
-        startDaemon(task, "ics-export");
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     public void shiftWeek(int deltaWeeks) {
@@ -518,27 +523,71 @@ public class CalendarTabView extends BorderPane {
         }
     }
 
+    private void handleDeleteGoal(ScheduleGoal goal) {
+        LocalDate targetWeek = currentWeekStart;
+        publishStatus("Updating goals and rescheduling...");
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() {
+                service.deleteGoal(goal.getId());
+                service.rescheduleWeek(targetWeek);
+                return null;
+            }
+        };
+        task.setOnSucceeded(ev -> {
+            selectedEvent = null;
+            refreshView();
+            publishStatus("Deleted goal: " + goal.getTitle());
+        });
+        task.setOnFailed(ev -> publishStatus("Failed to delete goal."));
+        CalendarService.backgroundExecutor().execute(task);
+    }
+
     private void handleUpdateSleep() {
         String raw = sleepField.getText();
         if (raw == null || raw.isBlank()) {
             return;
         }
+        LocalTime parsed;
         try {
-            LocalTime parsed = LocalTime.parse(raw.trim(), TIME_FMT);
-            service.updateSleepTime(parsed);
-            if (!service.findAllGoals().isEmpty()) {
-                service.rescheduleWeek(currentWeekStart);
+            parsed = EventFormValidator.parseTime(raw);
+        } catch (IllegalArgumentException ex) {
+            publishStatus("Invalid sleep time. Use HH:mm (for example 00:00 or 23:00).");
+            return;
+        }
+        LocalDate targetWeek = currentWeekStart;
+        publishStatus("Updating sleep window...");
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() {
+                service.updateSleepTime(parsed);
+                if (!service.findAllGoals().isEmpty()) {
+                    service.rescheduleWeek(targetWeek);
+                }
+                return null;
+            }
+        };
+        task.setOnSucceeded(ev -> {
+            if (selectedEvent != null && selectedEvent.getSource() == EventSource.SCHEDULED) {
+                selectedEvent = null;
             }
             refreshView();
             publishStatus("Sleep time updated to " + parsed.format(TIME_FMT));
-        } catch (DateTimeParseException ex) {
-            publishStatus("Invalid sleep time. Use HH:mm (for example 00:00 or 23:00).");
-        }
+        });
+        task.setOnFailed(ev -> publishStatus("Failed to update sleep time."));
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     private void onEventClicked(CalendarEvent event) {
         selectedEvent = event;
-        refreshView();
+        weekGridView.setSelectedEvent(event);
+        updateSelectedPanel();
+    }
+
+    public void clearSelection() {
+        selectedEvent = null;
+        weekGridView.setSelectedEvent(null);
+        updateSelectedPanel();
     }
 
     private void updateSelectedPanel() {
@@ -571,10 +620,6 @@ public class CalendarTabView extends BorderPane {
         if (onStatusChanged != null) {
             onStatusChanged.accept(status);
         }
-    }
-
-    private void startDaemon(Task<?> task, String name) {
-        CalendarService.backgroundExecutor().execute(task);
     }
 
     private String formatDays(RecurringRule rule) {
