@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventSource;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
@@ -34,9 +35,6 @@ public class WeekGridView extends VBox {
         void onSlotSelected(LocalDate date, LocalTime startTime, LocalTime endTime);
     }
 
-    private static final double MIN_HOUR_HEIGHT = 24.0;
-    private static final double MAX_HOUR_HEIGHT = 112.0;
-    private static final double DEFAULT_HOUR_HEIGHT = 48.0;
     private static final double GUTTER_WIDTH = 56.0;
     private static final double RESIZE_HANDLE_PX = 7.0;
     private static final DateTimeFormatter HEADER_DAY_FORMAT = DateTimeFormatter.ofPattern("EEE MM/dd");
@@ -48,11 +46,12 @@ public class WeekGridView extends VBox {
     private final List<List<Line>> gridLinesByDay = new ArrayList<>();
     private final List<Pane> eventLayers = new ArrayList<>();
     private final List<StackPane> dayColumns = new ArrayList<>();
+    private final List<VBox> renderedCards = new ArrayList<>();
     private final Pane gutterPane;
     private final ScrollPane scrollPane;
     private final Line nowLine = new Line();
 
-    private double hourHeight = DEFAULT_HOUR_HEIGHT;
+    private double hourHeight = CalendarGridMath.DEFAULT_HOUR_HEIGHT;
     private LocalDate weekStart;
     private List<CalendarEvent> currentEvents = List.of();
     private CalendarEvent selectedEvent;
@@ -158,7 +157,7 @@ public class WeekGridView extends VBox {
     }
 
     public void applyZoom(double newHourHeight) {
-        double clamped = Math.max(MIN_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, newHourHeight));
+        double clamped = CalendarGridMath.clampHourHeight(newHourHeight);
         if (Math.abs(clamped - hourHeight) < 0.1) {
             return;
         }
@@ -183,7 +182,7 @@ public class WeekGridView extends VBox {
             }
         }
         renderEvents();
-        scrollPane.setVvalue(previousV);
+        Platform.runLater(() -> scrollPane.setVvalue(previousV));
     }
 
     private Pane createStaticGridLayer(StackPane owner, List<Line> lineCollector) {
@@ -241,11 +240,9 @@ public class WeekGridView extends VBox {
                 return;
             }
             double curY = clampY(ev.getY());
-            int m1 = snapMinutes15(yToMinutes(Math.min(dragStartY[0], curY)));
-            int m2 = snapMinutes15(yToMinutes(Math.max(dragStartY[0], curY)));
-            if (m2 - m1 < 15) {
-                m2 = Math.min(24 * 60, m1 + 30);
-            }
+            int[] range = CalendarGridMath.computeDragCreateRange(dragStartY[0], curY, hourHeight);
+            int m1 = range[0];
+            int m2 = range[1];
             double topY = (m1 / 60.0) * hourHeight;
             double boxH = ((m2 - m1) / 60.0) * hourHeight;
             previewBox.setLayoutX(3);
@@ -269,26 +266,21 @@ public class WeekGridView extends VBox {
             }
             if (hadPreview && Math.abs(ev.getY() - startY) >= 8.0) {
                 double curY = clampY(ev.getY());
-                int startMin = snapMinutes15(yToMinutes(Math.min(startY, curY)));
-                int endMin = snapMinutes15(yToMinutes(Math.max(startY, curY)));
-                if (endMin - startMin < 15) {
-                    endMin = Math.min(24 * 60 - 15, startMin + 60);
-                }
-                if (endMin >= 24 * 60) {
-                    endMin = 23 * 60 + 45;
-                }
-                if (endMin > startMin) {
-                    LocalDate date = weekStart.plusDays(dayIndex);
-                    onSlotCreateRequested.onSlotSelected(date, minutesToTime(startMin), minutesToTime(endMin));
-                }
-            } else if (ev.getClickCount() == 2 && ev.getTarget() == layer) {
-                int startMin = snapMinutes30(yToMinutes(clampY(ev.getY())));
-                int endMin = Math.min(23 * 60 + 45, startMin + 60);
-                if (endMin <= startMin) {
-                    startMin = 22 * 60 + 45;
-                }
+                int[] range = CalendarGridMath.computeDragCreateRange(startY, curY, hourHeight);
                 LocalDate date = weekStart.plusDays(dayIndex);
-                onSlotCreateRequested.onSlotSelected(date, minutesToTime(startMin), minutesToTime(endMin));
+                onSlotCreateRequested.onSlotSelected(
+                        date,
+                        CalendarGridMath.minutesToTime(range[0]),
+                        CalendarGridMath.minutesToTime(range[1])
+                );
+            } else if (ev.getClickCount() == 2 && ev.getTarget() == layer) {
+                int[] range = CalendarGridMath.computeDoubleClickRange(clampY(ev.getY()), hourHeight);
+                LocalDate date = weekStart.plusDays(dayIndex);
+                onSlotCreateRequested.onSlotSelected(
+                        date,
+                        CalendarGridMath.minutesToTime(range[0]),
+                        CalendarGridMath.minutesToTime(range[1])
+                );
             }
         });
     }
@@ -332,6 +324,24 @@ public class WeekGridView extends VBox {
         renderEvents();
     }
 
+    public void setSelectedEvent(CalendarEvent selectedEvent) {
+        this.selectedEvent = selectedEvent;
+        for (VBox card : renderedCards) {
+            card.getStyleClass().remove("event-selected");
+            Object data = card.getUserData();
+            if (data instanceof CalendarEvent && isSameOccurrence(selectedEvent, (CalendarEvent) data)) {
+                card.getStyleClass().add("event-selected");
+            }
+        }
+    }
+
+    private boolean isSameOccurrence(CalendarEvent a, CalendarEvent b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        return a.getUid().equals(b.getUid()) && a.getStartTime().equals(b.getStartTime());
+    }
+
     private void updateHeaders() {
         if (weekStart == null) {
             return;
@@ -352,6 +362,7 @@ public class WeekGridView extends VBox {
         if (weekStart == null) {
             return;
         }
+        renderedCards.clear();
         LocalDate today = LocalDate.now();
         for (int d = 0; d < 7; d++) {
             Pane layer = eventLayers.get(d);
@@ -458,11 +469,14 @@ public class WeekGridView extends VBox {
 
     private VBox buildEventCard(DaySlice slice, LocalDate day) {
         CalendarEvent event = slice.event;
+        boolean canDragTiming = event.getId() > 0
+                && event.getStartTime().toLocalDate().equals(event.getEndTime().toLocalDate());
+
         VBox box = new VBox(1);
+        box.setUserData(event);
         box.getStyleClass().add("event-block");
         box.getStyleClass().add(categoryStyleClass(event.getCategory()));
-        if (selectedEvent != null && selectedEvent.getUid().equals(event.getUid())
-                && selectedEvent.getStartTime().equals(event.getStartTime())) {
+        if (isSameOccurrence(selectedEvent, event)) {
             box.getStyleClass().add("event-selected");
         }
 
@@ -475,15 +489,22 @@ public class WeekGridView extends VBox {
         timeLabel.getStyleClass().add("event-time");
 
         box.getChildren().addAll(title, timeLabel);
-        Tooltip.install(box, new Tooltip(event.getTitle() + " (" + timeRange + ") — double-click to edit, drag to move/resize"));
 
-        installCardMouseInteractions(box, timeLabel, slice, day);
+        String hint = "double-click to edit";
+        if (canDragTiming) {
+            hint = "double-click to edit, drag to move/resize";
+        } else if (event.getSource() == EventSource.RECURRING) {
+            hint = "double-click to edit recurring rule";
+        }
+        Tooltip.install(box, new Tooltip(event.getTitle() + " (" + timeRange + ") — " + hint));
+
+        installCardMouseInteractions(box, timeLabel, slice, day, canDragTiming);
+        renderedCards.add(box);
         return box;
     }
 
-    private void installCardMouseInteractions(VBox box, Label timeLabel, DaySlice slice, LocalDate day) {
+    private void installCardMouseInteractions(VBox box, Label timeLabel, DaySlice slice, LocalDate day, boolean canDragTiming) {
         CalendarEvent event = slice.event;
-        boolean canDragTiming = event.getId() > 0 && event.getStartTime().toLocalDate().equals(event.getEndTime().toLocalDate());
         final boolean[] resizing = new boolean[]{false};
         final boolean[] moved = new boolean[]{false};
         final double[] pressSceneY = new double[]{0.0};
@@ -524,17 +545,15 @@ public class WeekGridView extends VBox {
                 return;
             }
             moved[0] = true;
-            int deltaMinutes = snapMinutes15((int) Math.round((deltaY / hourHeight) * 60.0));
-            int duration = (int) (slice.endMin - slice.startMin);
+            int deltaMinutes = CalendarGridMath.snapMinutes15((int) Math.round((deltaY / hourHeight) * 60.0));
 
             if (resizing[0]) {
-                int candidateEnd = Math.max((int) slice.startMin + 15, Math.min(23 * 60 + 45, (int) slice.endMin + deltaMinutes));
                 newStartMin[0] = (int) slice.startMin;
-                newEndMin[0] = candidateEnd;
+                newEndMin[0] = CalendarGridMath.computeResizeEnd((int) slice.startMin, (int) slice.endMin, deltaMinutes);
             } else {
-                int candidateStart = Math.max(0, Math.min(24 * 60 - duration - 15, (int) slice.startMin + deltaMinutes));
-                newStartMin[0] = candidateStart;
-                newEndMin[0] = candidateStart + duration;
+                int[] movedRange = CalendarGridMath.computeDragMoveRange((int) slice.startMin, (int) slice.endMin, deltaMinutes);
+                newStartMin[0] = movedRange[0];
+                newEndMin[0] = movedRange[1];
             }
 
             double y = (newStartMin[0] / 60.0) * hourHeight;
@@ -542,7 +561,8 @@ public class WeekGridView extends VBox {
             box.setLayoutY(y);
             box.setPrefHeight(h);
             box.setMaxHeight(h);
-            timeLabel.setText(minutesToTime(newStartMin[0]).format(TIME_FORMAT) + "-" + minutesToTime(newEndMin[0]).format(TIME_FORMAT));
+            timeLabel.setText(CalendarGridMath.minutesToTime(newStartMin[0]).format(TIME_FORMAT)
+                    + "-" + CalendarGridMath.minutesToTime(newEndMin[0]).format(TIME_FORMAT));
         });
 
         box.setOnMouseReleased(ev -> {
@@ -555,8 +575,8 @@ public class WeekGridView extends VBox {
                         event.getId(),
                         event.getUid(),
                         event.getTitle(),
-                        day.atTime(minutesToTime(newStartMin[0])),
-                        day.atTime(minutesToTime(newEndMin[0])),
+                        day.atTime(CalendarGridMath.minutesToTime(newStartMin[0])),
+                        day.atTime(CalendarGridMath.minutesToTime(newEndMin[0])),
                         event.getCategory(),
                         event.getSource(),
                         event.getNotes()
@@ -577,23 +597,6 @@ public class WeekGridView extends VBox {
 
     private double clampY(double y) {
         return Math.max(0.0, Math.min(totalGridHeight() - 1.0, y));
-    }
-
-    private int yToMinutes(double y) {
-        return (int) Math.round((y / hourHeight) * 60.0);
-    }
-
-    private int snapMinutes15(int minutes) {
-        return (int) (Math.round(minutes / 15.0) * 15);
-    }
-
-    private int snapMinutes30(int minutes) {
-        return (int) (Math.floor(minutes / 30.0) * 30);
-    }
-
-    private LocalTime minutesToTime(int totalMinutes) {
-        int clamped = Math.max(0, Math.min(23 * 60 + 59, totalMinutes));
-        return LocalTime.of(clamped / 60, clamped % 60);
     }
 
     private String categoryStyleClass(EventCategory category) {
