@@ -32,6 +32,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -171,5 +172,26 @@ class CalendarServiceTest {
         assertEquals(DayOfWeek.THURSDAY, recurringEvents.get(1).getStartTime().getDayOfWeek());
         assertEquals(LocalTime.of(9, 30), recurringEvents.get(0).getStartTime().toLocalTime());
         assertEquals(LocalTime.of(13, 0), recurringEvents.get(0).getEndTime().toLocalTime());
+    }
+
+    @Test
+    void persistsAndClearsAiParserPreferences(@TempDir Path tempDir) {
+        DatabaseManager db = new DatabaseManager(tempDir.resolve("ai.db"));
+        db.initialize();
+        CalendarService realService = new CalendarService(new CalendarRepository(db));
+
+        assertFalse(realService.hasSavedGeminiApiKey());
+        realService.saveGeminiApiKey("  sample-key-123  ");
+        assertTrue(realService.hasSavedGeminiApiKey());
+
+        realService.clearGeminiApiKey();
+        assertFalse(realService.hasSavedGeminiApiKey());
+
+        realService.saveOllamaSettings("http://127.0.0.1:11435", "qwen2.5");
+        assertEquals("http://127.0.0.1:11435", realService.loadOllamaHost());
+        assertEquals("qwen2.5", realService.loadOllamaModel());
+
+        realService.saveOllamaSettings("", "");
+        assertEquals(OllamaProvider.DEFAULT_MODEL, realService.loadOllamaModel());
     }
 }

@@ -12,7 +12,10 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
+import javafx.scene.control.PasswordField;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -32,6 +35,8 @@ public class SettingsDialog extends Dialog<Void> {
 
     private final Label dbStatsLabel = new Label();
     private final Label memoryLabel = new Label();
+    private final Label geminiStatusLabel = new Label();
+    private final Button clearKeyBtn = new Button("Clear Key");
     private final Label feedbackLabel = new Label("");
     private UiTheme activeTheme;
 
@@ -49,14 +54,19 @@ public class SettingsDialog extends Dialog<Void> {
 
         initOwner(owner);
         setTitle("Settings");
-        setHeaderText("Appearance, Storage & Cleanup");
+        setHeaderText("Appearance, AI Parsing & Cleanup");
 
         DialogPane pane = getDialogPane();
         currentTheme.applyToDialog(pane);
         pane.getButtonTypes().add(ButtonType.CLOSE);
-        pane.setPrefWidth(480);
+        pane.setPrefSize(500, 560);
 
-        pane.setContent(buildContent());
+        ScrollPane scroll = new ScrollPane(buildContent());
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.getStyleClass().add("lc-dialog-scroll");
+        pane.setContent(scroll);
+        refreshAiStatus();
         refreshStats();
     }
 
@@ -82,6 +92,61 @@ public class SettingsDialog extends Dialog<Void> {
         HBox themeRow = new HBox(12, themeLabel, new Region(), themeBox);
         HBox.setHgrow(themeRow.getChildren().get(1), Priority.ALWAYS);
         themeRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label aiHeading = new Label("AI Sentence Parsing (Optional)");
+        aiHeading.getStyleClass().add("section-heading");
+
+        geminiStatusLabel.getStyleClass().add("dim-label");
+        geminiStatusLabel.setWrapText(true);
+
+        PasswordField geminiKeyField = new PasswordField();
+        geminiKeyField.setPromptText("Paste Gemini API key (optional)");
+        HBox.setHgrow(geminiKeyField, Priority.ALWAYS);
+
+        Button saveKeyBtn = new Button("Save Key");
+        saveKeyBtn.setOnAction(e -> {
+            String raw = geminiKeyField.getText();
+            if (raw == null || raw.isBlank()) {
+                feedbackLabel.setText("Enter a Gemini API key first (or click Clear Key).");
+                return;
+            }
+            service.saveGeminiApiKey(raw);
+            geminiKeyField.clear();
+            refreshAiStatus();
+            feedbackLabel.setText("Gemini API key saved locally.");
+            onStatus.accept("Gemini API key saved.");
+        });
+
+        clearKeyBtn.setOnAction(e -> {
+            service.clearGeminiApiKey();
+            geminiKeyField.clear();
+            refreshAiStatus();
+            feedbackLabel.setText("Saved Gemini API key cleared.");
+            onStatus.accept("Saved Gemini API key cleared.");
+        });
+
+        HBox geminiRow = new HBox(6, geminiKeyField, saveKeyBtn, clearKeyBtn);
+        geminiRow.setAlignment(Pos.CENTER_LEFT);
+
+        TextField ollamaHostField = new TextField(service.loadOllamaHost());
+        ollamaHostField.setPromptText("Ollama host");
+        HBox.setHgrow(ollamaHostField, Priority.ALWAYS);
+
+        TextField ollamaModelField = new TextField(service.loadOllamaModel());
+        ollamaModelField.setPromptText("Model");
+        ollamaModelField.setPrefWidth(115);
+
+        Button saveOllamaBtn = new Button("Save Ollama");
+        saveOllamaBtn.setOnAction(e -> {
+            service.saveOllamaSettings(ollamaHostField.getText(), ollamaModelField.getText());
+            ollamaHostField.setText(service.loadOllamaHost());
+            ollamaModelField.setText(service.loadOllamaModel());
+            feedbackLabel.setText("Ollama settings updated.");
+            onStatus.accept("Ollama settings updated.");
+        });
+
+        HBox ollamaRow = new HBox(6, ollamaHostField, ollamaModelField, saveOllamaBtn);
+        ollamaRow.setAlignment(Pos.CENTER_LEFT);
 
         Label storageHeading = new Label("Calendar Storage & Performance");
         storageHeading.getStyleClass().add("section-heading");
@@ -117,6 +182,11 @@ public class SettingsDialog extends Dialog<Void> {
         VBox content = new VBox(10,
                 appearanceHeading,
                 themeRow,
+                new Separator(),
+                aiHeading,
+                geminiStatusLabel,
+                geminiRow,
+                ollamaRow,
                 new Separator(),
                 storageHeading,
                 dbStatsLabel,
@@ -198,6 +268,18 @@ public class SettingsDialog extends Dialog<Void> {
             }
         });
         CalendarService.backgroundExecutor().execute(task);
+    }
+
+    private void refreshAiStatus() {
+        boolean hasSaved = service.hasSavedGeminiApiKey();
+        if (hasSaved) {
+            geminiStatusLabel.setText("Gemini: Active (saved in app)");
+        } else if (service.hasEnvGeminiApiKey()) {
+            geminiStatusLabel.setText("Gemini: Active (GEMINI_API_KEY env)");
+        } else {
+            geminiStatusLabel.setText("Gemini: Not set — offline parser active");
+        }
+        clearKeyBtn.setDisable(!hasSaved);
     }
 
     private void refreshStats() {

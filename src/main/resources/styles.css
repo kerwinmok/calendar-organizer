@@ -239,7 +239,7 @@
     -fx-font-weight: bold;
 }
 
-.text-field, .text-area {
+.text-field, .text-area, .password-field {
     -fx-background-color: -lc-field;
     -fx-border-color: -lc-field-border;
     -fx-border-radius: 5;
@@ -250,7 +250,7 @@
     -fx-highlight-text-fill: #ffffff;
 }
 
-.text-field:focused, .text-area:focused {
+.text-field:focused, .text-area:focused, .password-field:focused {
     -fx-border-color: -lc-accent;
 }
 
@@ -550,6 +550,12 @@
 
 .dialog-pane .label {
     -fx-text-fill: -lc-text;
+}
+
+.lc-dialog-scroll,
+.lc-dialog-scroll > .viewport {
+    -fx-background-color: -lc-chrome;
+    -fx-background: -lc-chrome;
 }
 
 .week-header {

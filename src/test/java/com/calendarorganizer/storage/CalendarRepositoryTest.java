@@ -275,4 +275,21 @@ class CalendarRepositoryTest {
                 null
         )));
     }
+
+    @Test
+    void loadsSavesDeletesCustomPreferencesAndPreservesThemOnCalendarReset() {
+        assertEquals("fallback", repository.loadPreference("gemini_api_key", "fallback"));
+
+        repository.savePreference("gemini_api_key", "key-one");
+        assertEquals("key-one", repository.loadPreference("gemini_api_key", ""));
+
+        repository.savePreference("gemini_api_key", "key-two");
+        assertEquals("key-two", repository.loadPreference("gemini_api_key", ""));
+
+        repository.clearAllCalendarData();
+        assertEquals("key-two", repository.loadPreference("gemini_api_key", ""));
+
+        repository.deletePreference("gemini_api_key");
+        assertEquals("", repository.loadPreference("gemini_api_key", ""));
+    }
 }

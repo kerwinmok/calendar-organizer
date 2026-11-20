@@ -457,31 +457,50 @@ public class CalendarRepository {
     }
 
     public String loadTheme() {
+        return loadPreference(PREF_THEME, "charcoal");
+    }
+
+    public void saveTheme(String themeId) {
+        savePreference(PREF_THEME, themeId);
+    }
+
+    public String loadPreference(String key, String fallback) {
         String sql = "SELECT pref_value FROM preferences WHERE pref_key = ?";
         try (Connection conn = dbManager.openConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, PREF_THEME);
+            ps.setString(1, key);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return rs.getString("pref_value");
                 }
             }
-            return "charcoal";
+            return fallback;
         } catch (SQLException e) {
-            throw new IllegalStateException("failed to load theme", e);
+            throw new IllegalStateException("failed to load preference", e);
         }
     }
 
-    public void saveTheme(String themeId) {
+    public void savePreference(String key, String value) {
         String sql = "INSERT INTO preferences (pref_key, pref_value) VALUES (?, ?) "
                 + "ON CONFLICT(pref_key) DO UPDATE SET pref_value = excluded.pref_value";
         try (Connection conn = dbManager.openConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, PREF_THEME);
-            ps.setString(2, themeId);
+            ps.setString(1, key);
+            ps.setString(2, value);
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new IllegalStateException("failed to save theme", e);
+            throw new IllegalStateException("failed to save preference", e);
+        }
+    }
+
+    public void deletePreference(String key) {
+        String sql = "DELETE FROM preferences WHERE pref_key = ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to delete preference", e);
         }
     }
 

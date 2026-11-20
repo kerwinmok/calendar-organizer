@@ -12,14 +12,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.function.Supplier;
 
 public class OllamaProvider implements LlmProvider {
 
     public static final String DEFAULT_HOST = "http://localhost:11434";
     public static final String DEFAULT_MODEL = "llama3.2";
 
-    private final String host;
-    private final String model;
+    private final Supplier<String> hostSupplier;
+    private final Supplier<String> modelSupplier;
     private final HttpClient httpClient;
     private final LlmPromptBuilder promptBuilder;
     private final LlmJsonParser jsonParser;
@@ -29,14 +30,22 @@ public class OllamaProvider implements LlmProvider {
     }
 
     public OllamaProvider(HttpClient httpClient) {
-        this(readEnv("OLLAMA_HOST", DEFAULT_HOST),
-                readEnv("OLLAMA_MODEL", DEFAULT_MODEL),
-                httpClient);
+        this(
+                () -> readEnv("OLLAMA_HOST", DEFAULT_HOST),
+                () -> readEnv("OLLAMA_MODEL", DEFAULT_MODEL),
+                httpClient
+        );
     }
 
     public OllamaProvider(String host, String model, HttpClient httpClient) {
-        this.host = trimTrailingSlash(host);
-        this.model = model;
+        this(() -> host, () -> model, httpClient);
+    }
+
+    public OllamaProvider(Supplier<String> hostSupplier,
+                          Supplier<String> modelSupplier,
+                          HttpClient httpClient) {
+        this.hostSupplier = hostSupplier;
+        this.modelSupplier = modelSupplier;
         this.httpClient = httpClient;
         this.promptBuilder = new LlmPromptBuilder();
         this.jsonParser = new LlmJsonParser();
@@ -51,7 +60,7 @@ public class OllamaProvider implements LlmProvider {
     public boolean isAvailable() {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(host + "/api/tags"))
+                    .uri(URI.create(resolveHost() + "/api/tags"))
                     .timeout(Duration.ofMillis(1500))
                     .GET()
                     .build();
@@ -65,13 +74,13 @@ public class OllamaProvider implements LlmProvider {
     @Override
     public ParseResult parse(String input, LocalDate referenceDate) throws LlmException {
         JsonObject payload = new JsonObject();
-        payload.addProperty("model", model);
+        payload.addProperty("model", resolveModel());
         payload.addProperty("prompt", promptBuilder.buildPrompt(input, referenceDate));
         payload.addProperty("format", "json");
         payload.addProperty("stream", false);
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(host + "/api/generate"))
+                .uri(URI.create(resolveHost() + "/api/generate"))
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
@@ -98,6 +107,24 @@ public class OllamaProvider implements LlmProvider {
         } catch (IOException e) {
             throw new LlmException("Ollama request failed: " + e.getMessage(), e);
         }
+    }
+
+    private String resolveHost() {
+        if (hostSupplier == null) {
+            return DEFAULT_HOST;
+        }
+        return trimTrailingSlash(hostSupplier.get());
+    }
+
+    private String resolveModel() {
+        if (modelSupplier == null) {
+            return DEFAULT_MODEL;
+        }
+        String raw = modelSupplier.get();
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_MODEL;
+        }
+        return raw.trim();
     }
 
     private static String readEnv(String key, String fallback) {

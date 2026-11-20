@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -75,5 +76,29 @@ class OllamaProviderTest {
 
         assertFalse(provider.isAvailable());
         assertThrows(LlmException.class, () -> provider.parse("work mon 9-5", LocalDate.of(2026, 11, 16)));
+    }
+
+    @Test
+    void picksUpUpdatedHostAndModelFromSuppliers() throws IOException, LlmException {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/tags", exchange -> exchange.sendResponseHeaders(200, -1));
+        server.createContext("/api/generate", exchange -> {
+            byte[] body = "{\"response\":\"{\\\"events\\\":[],\\\"recurringRules\\\":[],\\\"goals\\\":[],\\\"sleepTime\\\":null}\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        server.start();
+
+        AtomicReference<String> hostRef = new AtomicReference<>("http://127.0.0.1:1");
+        AtomicReference<String> modelRef = new AtomicReference<>("qwen2.5");
+        OllamaProvider provider = new OllamaProvider(hostRef::get, modelRef::get, HttpClient.newHttpClient());
+        assertFalse(provider.isAvailable());
+
+        hostRef.set("http://127.0.0.1:" + server.getAddress().getPort());
+        assertTrue(provider.isAvailable());
+        ParseResult res = provider.parse("study tomorrow", LocalDate.of(2026, 11, 16));
+        assertEquals("ollama", res.getParserUsed());
     }
 }

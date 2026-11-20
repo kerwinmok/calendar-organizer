@@ -90,4 +90,32 @@ class GeminiProviderTest {
         GeminiProvider badKey = new GeminiProvider("bad-key", "gemini-flash-lite-latest", baseUrl, HttpClient.newHttpClient());
         assertThrows(LlmException.class, () -> badKey.parse("work mon 7-6pm", LocalDate.of(2026, 11, 16)));
     }
+
+    @Test
+    void readsDynamicKeyAndModelSuppliersPerCall() throws IOException, LlmException {
+        AtomicReference<String> keyRef = new AtomicReference<>("");
+        AtomicReference<String> modelRef = new AtomicReference<>("custom-model");
+        AtomicReference<String> receivedPath = new AtomicReference<>();
+
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            receivedPath.set(exchange.getRequestURI().getPath());
+            String ok = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"events\\\":[],\\\"recurringRules\\\":[],\\\"goals\\\":[],\\\"sleepTime\\\":null}\"}]}}]}";
+            byte[] bytes = ok.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+        server.start();
+
+        String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+        GeminiProvider provider = new GeminiProvider(keyRef::get, modelRef::get, baseUrl, HttpClient.newHttpClient());
+        assertFalse(provider.isAvailable());
+
+        keyRef.set("live-updated-key");
+        assertTrue(provider.isAvailable());
+        provider.parse("test", LocalDate.of(2026, 11, 16));
+        assertEquals("/models/custom-model:generateContent", receivedPath.get());
+    }
 }

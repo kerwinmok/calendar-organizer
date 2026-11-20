@@ -36,6 +36,10 @@ import java.util.concurrent.Executors;
 
 public class CalendarService {
 
+    private static final String PREF_GEMINI_API_KEY = "gemini_api_key";
+    private static final String PREF_OLLAMA_HOST = "ollama_host";
+    private static final String PREF_OLLAMA_MODEL = "ollama_model";
+
     private static final Executor SHARED_BG_EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "calendar-bg-worker");
         thread.setDaemon(true);
@@ -50,7 +54,7 @@ public class CalendarService {
     private final IcsExporter icsExporter;
 
     public CalendarService(CalendarRepository repository) {
-        this(repository, createSharedParserService());
+        this(repository, createSharedParserService(repository));
     }
 
     private CalendarService(CalendarRepository repository, ScheduleParserService parserService) {
@@ -64,16 +68,44 @@ public class CalendarService {
         );
     }
 
-    private static ScheduleParserService createSharedParserService() {
+    private static ScheduleParserService createSharedParserService(CalendarRepository repository) {
         HttpClient sharedClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .executor(SHARED_BG_EXECUTOR)
                 .build();
         return new ScheduleParserService(
                 new RuleParser(),
-                new OllamaProvider(sharedClient),
-                new GeminiProvider(sharedClient)
+                new OllamaProvider(
+                        () -> resolvePreferenceOrEnv(repository, PREF_OLLAMA_HOST, "OLLAMA_HOST", OllamaProvider.DEFAULT_HOST),
+                        () -> resolvePreferenceOrEnv(repository, PREF_OLLAMA_MODEL, "OLLAMA_MODEL", OllamaProvider.DEFAULT_MODEL),
+                        sharedClient
+                ),
+                new GeminiProvider(
+                        () -> resolvePreferenceOrEnv(repository, PREF_GEMINI_API_KEY, "GEMINI_API_KEY", ""),
+                        () -> resolveEnv("GEMINI_MODEL", GeminiProvider.DEFAULT_MODEL),
+                        GeminiProvider.DEFAULT_BASE_URL,
+                        sharedClient
+                )
         );
+    }
+
+    private static String resolvePreferenceOrEnv(CalendarRepository repository,
+                                                 String prefKey,
+                                                 String envKey,
+                                                 String fallback) {
+        String saved = repository.loadPreference(prefKey, "");
+        if (saved != null && !saved.isBlank()) {
+            return saved.trim();
+        }
+        return resolveEnv(envKey, fallback);
+    }
+
+    private static String resolveEnv(String envKey, String fallback) {
+        String envVal = System.getenv(envKey);
+        if (envVal != null && !envVal.isBlank()) {
+            return envVal.trim();
+        }
+        return fallback;
     }
 
     public static Executor backgroundExecutor() {
@@ -251,5 +283,47 @@ public class CalendarService {
 
     public void saveTheme(String themeId) {
         repository.saveTheme(themeId);
+    }
+
+    public boolean hasSavedGeminiApiKey() {
+        return !repository.loadPreference(PREF_GEMINI_API_KEY, "").isBlank();
+    }
+
+    public boolean hasEnvGeminiApiKey() {
+        String envVal = System.getenv("GEMINI_API_KEY");
+        return envVal != null && !envVal.isBlank();
+    }
+
+    public void saveGeminiApiKey(String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            repository.deletePreference(PREF_GEMINI_API_KEY);
+        } else {
+            repository.savePreference(PREF_GEMINI_API_KEY, apiKey.trim());
+        }
+    }
+
+    public void clearGeminiApiKey() {
+        repository.deletePreference(PREF_GEMINI_API_KEY);
+    }
+
+    public String loadOllamaHost() {
+        return resolvePreferenceOrEnv(repository, PREF_OLLAMA_HOST, "OLLAMA_HOST", OllamaProvider.DEFAULT_HOST);
+    }
+
+    public String loadOllamaModel() {
+        return resolvePreferenceOrEnv(repository, PREF_OLLAMA_MODEL, "OLLAMA_MODEL", OllamaProvider.DEFAULT_MODEL);
+    }
+
+    public void saveOllamaSettings(String host, String model) {
+        if (host == null || host.isBlank()) {
+            repository.deletePreference(PREF_OLLAMA_HOST);
+        } else {
+            repository.savePreference(PREF_OLLAMA_HOST, host.trim());
+        }
+        if (model == null || model.isBlank()) {
+            repository.deletePreference(PREF_OLLAMA_MODEL);
+        } else {
+            repository.savePreference(PREF_OLLAMA_MODEL, model.trim());
+        }
     }
 }

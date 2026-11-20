@@ -13,14 +13,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.function.Supplier;
 
 public class GeminiProvider implements LlmProvider {
 
     public static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
     public static final String DEFAULT_MODEL = "gemini-flash-lite-latest";
 
-    private final String apiKey;
-    private final String model;
+    private final Supplier<String> apiKeySupplier;
+    private final Supplier<String> modelSupplier;
     private final String baseUrl;
     private final HttpClient httpClient;
     private final LlmPromptBuilder promptBuilder;
@@ -31,23 +32,24 @@ public class GeminiProvider implements LlmProvider {
     }
 
     public GeminiProvider(HttpClient httpClient) {
-        this(System.getenv("GEMINI_API_KEY"),
-                readEnv("GEMINI_MODEL", DEFAULT_MODEL),
+        this(
+                () -> System.getenv("GEMINI_API_KEY"),
+                () -> readEnv("GEMINI_MODEL", DEFAULT_MODEL),
                 DEFAULT_BASE_URL,
-                httpClient);
+                httpClient
+        );
     }
 
     public GeminiProvider(String apiKey, String model, String baseUrl, HttpClient httpClient) {
-        if (apiKey == null) {
-            this.apiKey = "";
-        } else {
-            this.apiKey = apiKey.trim();
-        }
-        if (model == null || model.isBlank()) {
-            this.model = DEFAULT_MODEL;
-        } else {
-            this.model = model.trim();
-        }
+        this(() -> apiKey, () -> model, baseUrl, httpClient);
+    }
+
+    public GeminiProvider(Supplier<String> apiKeySupplier,
+                          Supplier<String> modelSupplier,
+                          String baseUrl,
+                          HttpClient httpClient) {
+        this.apiKeySupplier = apiKeySupplier;
+        this.modelSupplier = modelSupplier;
         this.baseUrl = trimTrailingSlash(baseUrl);
         this.httpClient = httpClient;
         this.promptBuilder = new LlmPromptBuilder();
@@ -61,17 +63,18 @@ public class GeminiProvider implements LlmProvider {
 
     @Override
     public boolean isAvailable() {
-        return !apiKey.isBlank();
+        return !resolveApiKey().isBlank();
     }
 
     @Override
     public ParseResult parse(String input, LocalDate referenceDate) throws LlmException {
-        if (!isAvailable()) {
+        String apiKey = resolveApiKey();
+        if (apiKey.isBlank()) {
             throw new LlmException("GEMINI_API_KEY is not set.");
         }
 
         JsonObject payload = buildRequestPayload(promptBuilder.buildPrompt(input, referenceDate));
-        String endpoint = baseUrl + "/models/" + model + ":generateContent";
+        String endpoint = baseUrl + "/models/" + resolveModel() + ":generateContent";
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint))
@@ -166,6 +169,28 @@ public class GeminiProvider implements LlmProvider {
             throw new LlmException("Gemini part missing text.");
         }
         return fallbackText;
+    }
+
+    private String resolveApiKey() {
+        if (apiKeySupplier == null) {
+            return "";
+        }
+        String raw = apiKeySupplier.get();
+        if (raw == null) {
+            return "";
+        }
+        return raw.trim();
+    }
+
+    private String resolveModel() {
+        if (modelSupplier == null) {
+            return DEFAULT_MODEL;
+        }
+        String raw = modelSupplier.get();
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_MODEL;
+        }
+        return raw.trim();
     }
 
     private static String readEnv(String key, String fallback) {
