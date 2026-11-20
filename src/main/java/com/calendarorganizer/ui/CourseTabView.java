@@ -5,6 +5,7 @@ import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
+import com.calendarorganizer.service.CalendarService;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -498,9 +499,7 @@ public class CourseTabView extends BorderPane {
                 publishStatus("Export failed.");
             }
         });
-        Thread worker = new Thread(task, "course-export");
-        worker.setDaemon(true);
-        worker.start();
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     public void exportAllCourses() {
@@ -532,9 +531,7 @@ public class CourseTabView extends BorderPane {
                 publishStatus("Export failed.");
             }
         });
-        Thread worker = new Thread(task, "course-export-all");
-        worker.setDaemon(true);
-        worker.start();
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     private void publishStatus(String message) {

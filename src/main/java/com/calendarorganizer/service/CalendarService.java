@@ -31,8 +31,16 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 public class CalendarService {
+
+    private static final Executor SHARED_BG_EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "calendar-bg-worker");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final CalendarRepository repository;
     private final ScheduleParserService parserService;
@@ -59,12 +67,17 @@ public class CalendarService {
     private static ScheduleParserService createSharedParserService() {
         HttpClient sharedClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
+                .executor(SHARED_BG_EXECUTOR)
                 .build();
         return new ScheduleParserService(
                 new RuleParser(),
                 new OllamaProvider(sharedClient),
                 new GeminiProvider(sharedClient)
         );
+    }
+
+    public static Executor backgroundExecutor() {
+        return SHARED_BG_EXECUTOR;
     }
 
     public CalendarService(CalendarRepository repository,
@@ -91,12 +104,8 @@ public class CalendarService {
         List<RecurringRule> rules = mapper.toRecurringRules(parseResult);
         List<ScheduleGoal> goals = mapper.toGoals(parseResult);
 
-        for (CalendarEvent event : events) {
-            repository.saveEvent(event);
-        }
-        for (RecurringRule rule : rules) {
-            repository.saveRecurringRule(rule);
-        }
+        repository.saveEvents(events);
+        repository.saveRecurringRules(rules);
         for (ScheduleGoal goal : goals) {
             repository.deleteGoalsByType(goal.getType());
             repository.saveGoal(goal);
@@ -135,9 +144,7 @@ public class CalendarService {
         SchedulePreferences prefs = repository.loadPreferences();
 
         ScheduleResult result = scheduler.scheduleWeek(weekStart, existing, rules, goals, prefs);
-        for (CalendarEvent scheduled : result.getScheduledEvents()) {
-            repository.saveEvent(scheduled);
-        }
+        repository.saveEvents(result.getScheduledEvents());
         return result;
     }
 
@@ -166,12 +173,8 @@ public class CalendarService {
     }
 
     private IcsImportSummary persistIcsResult(IcsParseResult parsed) {
-        for (CalendarEvent event : parsed.getEvents()) {
-            repository.upsertEventByUid(event);
-        }
-        for (RecurringRule rule : parsed.getRecurringRules()) {
-            repository.saveRecurringRule(rule);
-        }
+        repository.upsertEventsByUid(parsed.getEvents());
+        repository.saveRecurringRules(parsed.getRecurringRules());
         return new IcsImportSummary(parsed.getEvents().size(), parsed.getRecurringRules().size(), parsed.getWarnings());
     }
 

@@ -198,9 +198,7 @@ public class SettingsDialog extends Dialog<Void> {
                 feedbackLabel.setText("Operation failed.");
             }
         });
-        Thread thread = new Thread(task, "calendar-maintenance");
-        thread.setDaemon(true);
-        thread.start();
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     private void refreshStats() {

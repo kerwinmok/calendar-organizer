@@ -194,10 +194,6 @@ public class CalendarTabView extends BorderPane {
         }
     }
 
-    public boolean isInspectorVisible() {
-        return inspectorVisible;
-    }
-
     public void submitSentence(String text, ParserMode mode, Runnable onFinished) {
         if (text == null || text.isBlank()) {
             publishStatus("Enter a schedule sentence first.");
@@ -449,9 +445,7 @@ public class CalendarTabView extends BorderPane {
     }
 
     private void startDaemon(Task<?> task, String name) {
-        Thread worker = new Thread(task, name);
-        worker.setDaemon(true);
-        worker.start();
+        CalendarService.backgroundExecutor().execute(task);
     }
 
     private void applyDialogTheme(DialogPane pane, UiTheme theme) {

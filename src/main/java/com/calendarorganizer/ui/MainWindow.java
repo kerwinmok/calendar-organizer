@@ -289,7 +289,6 @@ public class MainWindow extends BorderPane {
 
     private void updateStatus(String status) {
         statusLabel.setText(status);
-        refreshFooter();
     }
 
     private void refreshFooter() {
@@ -300,9 +299,5 @@ public class MainWindow extends BorderPane {
 
         StorageStats stats = calendarService.getStorageStats();
         statsPill.setText(stats.getEventCount() + " events · " + stats.formatSize());
-    }
-
-    public CourseTabView getCourseTabView() {
-        return courseTabView;
     }
 }

@@ -28,6 +28,7 @@ try {
         --main-jar "calendar-organizer-1.0.0.jar" `
         --main-class "com.calendarorganizer.Launcher" `
         --app-version "1.0.0" `
+        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,jdk.crypto.ec,jdk.unsupported" `
         --java-options "-Xms32m" `
         --java-options "-Xmx256m" `
         --java-options "-XX:+UseG1GC" `
