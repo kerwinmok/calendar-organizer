@@ -20,6 +20,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CalendarRepositoryTest {
@@ -255,5 +256,23 @@ class CalendarRepositoryTest {
         assertEquals(EnumSet.of(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY), reloadedRule.getDaysOfWeek());
         assertEquals(LocalTime.of(8, 30), reloadedRule.getStartTime());
         assertEquals(LocalTime.of(16, 30), reloadedRule.getEndTime());
+
+        assertThrows(IllegalArgumentException.class, () -> repository.updateEvent(CalendarEvent.create(
+                "Unsaved",
+                LocalDateTime.of(2026, 11, 18, 9, 0),
+                LocalDateTime.of(2026, 11, 18, 10, 0),
+                EventCategory.GENERAL,
+                EventSource.MANUAL
+        )));
+        assertThrows(IllegalArgumentException.class, () -> repository.updateRecurringRule(new RecurringRule(
+                0L,
+                "Unsaved",
+                EnumSet.of(DayOfWeek.FRIDAY),
+                LocalTime.of(9, 0),
+                LocalTime.of(10, 0),
+                EventCategory.GENERAL,
+                null,
+                null
+        )));
     }
 }

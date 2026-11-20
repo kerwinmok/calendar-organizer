@@ -9,6 +9,7 @@ import com.calendarorganizer.llm.ScheduleParserService;
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
 import com.calendarorganizer.model.EventSource;
+import com.calendarorganizer.model.RecurringRule;
 import com.calendarorganizer.parser.ParseResultMapper;
 import com.calendarorganizer.parser.RuleParser;
 import com.calendarorganizer.scheduler.Scheduler;
@@ -22,9 +23,12 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.EnumSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -111,5 +115,61 @@ class CalendarServiceTest {
         assertEquals(0, resetStats.getEventCount());
         assertEquals(0, resetStats.getRecurringRuleCount());
         assertEquals(0, resetStats.getGoalCount());
+    }
+
+    @Test
+    void savesAndUpdatesManualEventAndRecurringRuleTimings() {
+        CalendarEvent manual = service.saveManualEvent(CalendarEvent.create(
+                "Lab Review",
+                LocalDateTime.of(2026, 11, 18, 10, 0),
+                LocalDateTime.of(2026, 11, 18, 11, 0),
+                EventCategory.STUDY,
+                EventSource.MANUAL
+        ));
+        assertTrue(manual.getId() > 0L);
+
+        CalendarEvent moved = new CalendarEvent(
+                manual.getId(),
+                manual.getUid(),
+                "Lab Review Updated",
+                LocalDateTime.of(2026, 11, 18, 14, 0),
+                LocalDateTime.of(2026, 11, 18, 15, 30),
+                EventCategory.BUSY,
+                EventSource.MANUAL,
+                "Room 204"
+        );
+        service.updateEvent(moved);
+
+        service.applySentence("i work mon 8-12pm", MONDAY, ParserMode.RULES);
+        RecurringRule existingRule = service.findAllRecurringRules().get(0);
+        RecurringRule updatedRule = new RecurringRule(
+                existingRule.getId(),
+                "Lab Duty",
+                EnumSet.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY),
+                LocalTime.of(9, 30),
+                LocalTime.of(13, 0),
+                EventCategory.WORK,
+                existingRule.getStartDate(),
+                existingRule.getEndDate()
+        );
+        service.updateRecurringRule(updatedRule);
+
+        List<CalendarEvent> weekEvents = service.getEventsForWeek(MONDAY);
+        List<CalendarEvent> manualEvents = weekEvents.stream()
+                .filter(e -> e.getSource() == EventSource.MANUAL)
+                .toList();
+        assertEquals(1, manualEvents.size());
+        assertEquals("Lab Review Updated", manualEvents.get(0).getTitle());
+        assertEquals(LocalDateTime.of(2026, 11, 18, 14, 0), manualEvents.get(0).getStartTime());
+        assertEquals(LocalDateTime.of(2026, 11, 18, 15, 30), manualEvents.get(0).getEndTime());
+
+        List<CalendarEvent> recurringEvents = weekEvents.stream()
+                .filter(e -> e.getSource() == EventSource.RECURRING)
+                .toList();
+        assertEquals(2, recurringEvents.size());
+        assertEquals(DayOfWeek.TUESDAY, recurringEvents.get(0).getStartTime().getDayOfWeek());
+        assertEquals(DayOfWeek.THURSDAY, recurringEvents.get(1).getStartTime().getDayOfWeek());
+        assertEquals(LocalTime.of(9, 30), recurringEvents.get(0).getStartTime().toLocalTime());
+        assertEquals(LocalTime.of(13, 0), recurringEvents.get(0).getEndTime().toLocalTime());
     }
 }

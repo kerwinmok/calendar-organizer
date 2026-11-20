@@ -94,4 +94,39 @@ class CourseManagerTest {
         assertThrows(IllegalArgumentException.class,
                 () -> manager.createItem(cmpt, CourseSection.NOTES, "../secret", "x"));
     }
+
+    @Test
+    void sortsLargeNumericPrefixesWithoutOverflowAndRejectsInvalidExternalImports(@TempDir Path tempDir) throws IOException {
+        Course cmpt = manager.createCourse("CMPT 201");
+        Path fileA = tempDir.resolve("2026112012345678901234502_slides.pdf");
+        Path fileB = tempDir.resolve("2026112012345678901234510_slides.pdf");
+        Path fileC = tempDir.resolve("202611201234567890123451_slides.pdf");
+        Files.writeString(fileA, "a");
+        Files.writeString(fileB, "b");
+        Files.writeString(fileC, "c");
+
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, fileB);
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, fileA);
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, fileC);
+
+        List<CourseItem> items = manager.listItems(cmpt, CourseSection.LECTURES);
+        assertEquals(List.of(
+                "202611201234567890123451_slides.pdf",
+                "2026112012345678901234502_slides.pdf",
+                "2026112012345678901234510_slides.pdf"
+        ), items.stream().map(CourseItem::getFileName).toList());
+
+        Path missing = tempDir.resolve("missing.pdf");
+        assertThrows(IllegalArgumentException.class,
+                () -> manager.importExternalFile(cmpt, CourseSection.LECTURES, missing));
+
+        Path dir = Files.createDirectory(tempDir.resolve("slides-folder"));
+        assertThrows(IllegalArgumentException.class,
+                () -> manager.importExternalFile(cmpt, CourseSection.LECTURES, dir));
+
+        Path hidden = tempDir.resolve(".hidden.pdf");
+        Files.writeString(hidden, "hidden");
+        assertThrows(IllegalArgumentException.class,
+                () -> manager.importExternalFile(cmpt, CourseSection.LECTURES, hidden));
+    }
 }

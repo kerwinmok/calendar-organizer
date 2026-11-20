@@ -15,6 +15,7 @@ import java.util.zip.ZipFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CourseExporterTest {
@@ -36,6 +37,13 @@ class CourseExporterTest {
         manager.createItem(cmpt, CourseSection.COURSEWORK, "lab-1", "# Lab 1\nMalloc");
         Files.writeString(cmpt.getDirectory().resolve("lectures/ignore.txt"), "junk", StandardCharsets.UTF_8);
 
+        Path samplePdf = tempDir.resolve("Slides.pdf");
+        Path samplePptx = tempDir.resolve("Deck.pptx");
+        Files.writeString(samplePdf, "%PDF-1.7");
+        Files.writeString(samplePptx, "PK-pptx");
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, samplePdf);
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, samplePptx);
+
         Path zipPath = tempDir.resolve("cmpt201.zip");
         exporter.exportCourse(cmpt, zipPath);
 
@@ -46,7 +54,9 @@ class CourseExporterTest {
             assertNotNull(zip.getEntry("CMPT-201/lectures/lecture-01.md"));
             assertNotNull(zip.getEntry("CMPT-201/notes/exam-review.md"));
             assertNotNull(zip.getEntry("CMPT-201/coursework/lab-1.md"));
-            assertEquals(null, zip.getEntry("CMPT-201/lectures/ignore.txt"));
+            assertNull(zip.getEntry("CMPT-201/lectures/ignore.txt"));
+            assertNull(zip.getEntry("CMPT-201/lectures/Slides.pdf"));
+            assertNull(zip.getEntry("CMPT-201/lectures/Deck.pptx"));
 
             String lecture = readEntry(zip, "CMPT-201/lectures/lecture-01.md");
             assertEquals("# Lecture 1\nPointers\n", lecture);
