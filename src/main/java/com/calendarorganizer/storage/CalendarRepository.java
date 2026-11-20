@@ -100,6 +100,14 @@ public class CalendarRepository {
         }
     }
 
+    public void updateEvent(CalendarEvent event) {
+        try (Connection conn = dbManager.openConnection()) {
+            updateExistingEvent(conn, event.getId(), event);
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to update event", e);
+        }
+    }
+
     public void upsertEventsByUid(List<CalendarEvent> events) {
         if (events == null || events.isEmpty()) {
             return;
@@ -302,6 +310,33 @@ public class CalendarRepository {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("failed to delete recurring rule", e);
+        }
+    }
+
+    public void updateRecurringRule(RecurringRule rule) {
+        String sql = "UPDATE recurring_rules SET title = ?, days_of_week = ?, start_time = ?, "
+                + "end_time = ?, category = ?, start_date = ?, end_date = ? WHERE id = ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, rule.getTitle());
+            ps.setString(2, encodeDays(rule.getDaysOfWeek()));
+            ps.setString(3, rule.getStartTime().format(TIME_FORMAT));
+            ps.setString(4, rule.getEndTime().format(TIME_FORMAT));
+            ps.setString(5, rule.getCategory().name());
+            if (rule.getStartDate() == null) {
+                ps.setString(6, null);
+            } else {
+                ps.setString(6, rule.getStartDate().format(DATE_FORMAT));
+            }
+            if (rule.getEndDate() == null) {
+                ps.setString(7, null);
+            } else {
+                ps.setString(7, rule.getEndDate().format(DATE_FORMAT));
+            }
+            ps.setLong(8, rule.getId());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to update recurring rule", e);
         }
     }
 

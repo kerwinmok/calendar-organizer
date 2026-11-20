@@ -205,8 +205,20 @@ public class CalendarService {
         repository.deleteEvent(id);
     }
 
+    public CalendarEvent saveManualEvent(CalendarEvent event) {
+        return repository.saveEvent(event);
+    }
+
+    public void updateEvent(CalendarEvent event) {
+        repository.updateEvent(event);
+    }
+
     public void deleteRecurringRule(long id) {
         repository.deleteRecurringRule(id);
+    }
+
+    public void updateRecurringRule(RecurringRule rule) {
+        repository.updateRecurringRule(rule);
     }
 
     public void deleteGoal(long id) {

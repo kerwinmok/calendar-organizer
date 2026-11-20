@@ -199,4 +199,61 @@ class CalendarRepositoryTest {
         assertEquals(SchedulePreferences.DEFAULT_SLEEP_TIME, repository.loadPreferences().getSleepTime());
         assertEquals("midnight", repository.loadTheme());
     }
+
+    @Test
+    void updatesEventAndRecurringRuleTimings() {
+        CalendarEvent saved = repository.saveEvent(CalendarEvent.create(
+                "Study Group",
+                LocalDateTime.of(2026, 11, 18, 13, 0),
+                LocalDateTime.of(2026, 11, 18, 14, 0),
+                EventCategory.STUDY,
+                EventSource.MANUAL
+        ));
+        CalendarEvent modified = new CalendarEvent(
+                saved.getId(),
+                saved.getUid(),
+                "Study Group Moved",
+                LocalDateTime.of(2026, 11, 18, 15, 30),
+                LocalDateTime.of(2026, 11, 18, 17, 0),
+                EventCategory.BUSY,
+                EventSource.MANUAL,
+                "Library"
+        );
+        repository.updateEvent(modified);
+
+        CalendarEvent reloaded = repository.findAllEvents().get(0);
+        assertEquals("Study Group Moved", reloaded.getTitle());
+        assertEquals(LocalDateTime.of(2026, 11, 18, 15, 30), reloaded.getStartTime());
+        assertEquals(LocalDateTime.of(2026, 11, 18, 17, 0), reloaded.getEndTime());
+        assertEquals(EventCategory.BUSY, reloaded.getCategory());
+        assertEquals("Library", reloaded.getNotes());
+
+        RecurringRule rule = repository.saveRecurringRule(new RecurringRule(
+                0L,
+                "Work",
+                EnumSet.of(DayOfWeek.MONDAY),
+                LocalTime.of(7, 0),
+                LocalTime.of(15, 0),
+                EventCategory.WORK,
+                null,
+                null
+        ));
+        RecurringRule updatedRule = new RecurringRule(
+                rule.getId(),
+                "Work Shift",
+                EnumSet.of(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY),
+                LocalTime.of(8, 30),
+                LocalTime.of(16, 30),
+                EventCategory.WORK,
+                null,
+                null
+        );
+        repository.updateRecurringRule(updatedRule);
+
+        RecurringRule reloadedRule = repository.findAllRecurringRules().get(0);
+        assertEquals("Work Shift", reloadedRule.getTitle());
+        assertEquals(EnumSet.of(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY), reloadedRule.getDaysOfWeek());
+        assertEquals(LocalTime.of(8, 30), reloadedRule.getStartTime());
+        assertEquals(LocalTime.of(16, 30), reloadedRule.getEndTime());
+    }
 }
