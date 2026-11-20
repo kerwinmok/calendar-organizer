@@ -18,11 +18,19 @@ public class DatabaseManager {
 
     public Connection openConnection() throws SQLException {
         ensureParentDir();
-        return DriverManager.getConnection("jdbc:sqlite:" + dbPath.toAbsolutePath());
+        Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath.toAbsolutePath());
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA cache_size = -2000");
+            stmt.execute("PRAGMA temp_store = MEMORY");
+            stmt.execute("PRAGMA busy_timeout = 3000");
+        }
+        return conn;
     }
 
     public void initialize() {
         try (Connection conn = openConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA journal_mode = WAL");
+            stmt.execute("PRAGMA synchronous = NORMAL");
             stmt.executeUpdate(
                     "CREATE TABLE IF NOT EXISTS events ("
                             + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -34,6 +42,8 @@ public class DatabaseManager {
                             + "source TEXT NOT NULL, "
                             + "notes TEXT)"
             );
+            stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_events_time ON events(start_time, end_time)");
+            stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_events_source ON events(source)");
             stmt.executeUpdate(
                     "CREATE TABLE IF NOT EXISTS recurring_rules ("
                             + "id INTEGER PRIMARY KEY AUTOINCREMENT, "

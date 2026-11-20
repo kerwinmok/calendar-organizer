@@ -8,6 +8,9 @@ import com.calendarorganizer.model.RecurringRule;
 import com.calendarorganizer.model.ScheduleGoal;
 import com.calendarorganizer.model.SchedulePreferences;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -32,6 +35,7 @@ public class CalendarRepository {
 
     private static final String PREF_SLEEP_TIME = "sleep_time";
     private static final String PREF_SLEEP_HOURS = "sleep_duration_hours";
+    private static final String PREF_THEME = "ui_theme";
 
     private final DatabaseManager dbManager;
 
@@ -334,6 +338,121 @@ public class CalendarRepository {
         } catch (SQLException e) {
             throw new IllegalStateException("failed to save preferences", e);
         }
+    }
+
+    public String loadTheme() {
+        String sql = "SELECT pref_value FROM preferences WHERE pref_key = ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, PREF_THEME);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("pref_value");
+                }
+            }
+            return "charcoal";
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to load theme", e);
+        }
+    }
+
+    public void saveTheme(String themeId) {
+        String sql = "INSERT INTO preferences (pref_key, pref_value) VALUES (?, ?) "
+                + "ON CONFLICT(pref_key) DO UPDATE SET pref_value = excluded.pref_value";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, PREF_THEME);
+            ps.setString(2, themeId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to save theme", e);
+        }
+    }
+
+    public int deleteEventsEndingBefore(LocalDateTime cutoff) {
+        String sql = "DELETE FROM events WHERE end_time < ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, cutoff.format(DT_FORMAT));
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to delete past events", e);
+        }
+    }
+
+    public StorageStats clearAllCalendarData() {
+        try (Connection conn = dbManager.openConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement stmt = conn.createStatement();
+                 PreparedStatement prefPs = conn.prepareStatement(
+                         "DELETE FROM preferences WHERE pref_key IN (?, ?)")) {
+                stmt.executeUpdate("DELETE FROM events");
+                stmt.executeUpdate("DELETE FROM recurring_rules");
+                stmt.executeUpdate("DELETE FROM goals");
+                prefPs.setString(1, PREF_SLEEP_TIME);
+                prefPs.setString(2, PREF_SLEEP_HOURS);
+                prefPs.executeUpdate();
+                conn.commit();
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to clear calendar data", e);
+        }
+        return optimizeDatabase();
+    }
+
+    public StorageStats getStorageStats() {
+        try (Connection conn = dbManager.openConnection(); Statement stmt = conn.createStatement()) {
+            int events = queryCount(stmt, "SELECT COUNT(*) FROM events");
+            int rules = queryCount(stmt, "SELECT COUNT(*) FROM recurring_rules");
+            int goals = queryCount(stmt, "SELECT COUNT(*) FROM goals");
+            long bytes = computeDatabaseBytes();
+            return new StorageStats(events, rules, goals, bytes);
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to collect storage stats", e);
+        }
+    }
+
+    public StorageStats optimizeDatabase() {
+        try (Connection conn = dbManager.openConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+            stmt.execute("VACUUM");
+            stmt.execute("PRAGMA optimize");
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to optimize database", e);
+        }
+        return getStorageStats();
+    }
+
+    private int queryCount(Statement stmt, String sql) throws SQLException {
+        try (ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+            return 0;
+        }
+    }
+
+    private long computeDatabaseBytes() {
+        long total = 0L;
+        Path db = dbManager.getDbPath().toAbsolutePath();
+        total = total + fileSizeOrZero(db);
+        total = total + fileSizeOrZero(Path.of(db + "-wal"));
+        total = total + fileSizeOrZero(Path.of(db + "-shm"));
+        return total;
+    }
+
+    private long fileSizeOrZero(Path path) {
+        try {
+            if (Files.isRegularFile(path)) {
+                return Files.size(path);
+            }
+        } catch (IOException ignored) {
+            return 0L;
+        }
+        return 0L;
     }
 
     private CalendarEvent mapEvent(ResultSet rs) throws SQLException {

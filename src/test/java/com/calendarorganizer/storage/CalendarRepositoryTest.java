@@ -149,4 +149,54 @@ class CalendarRepositoryTest {
         assertTrue(repository.findAllRecurringRules().isEmpty());
         assertTrue(repository.findAllGoals().isEmpty());
     }
+
+    @Test
+    void deletesPastEventsResetsCalendarDataOptimizesAndPersistsTheme() {
+        repository.saveEvent(CalendarEvent.create(
+                "Old Event",
+                LocalDateTime.of(2026, 11, 10, 9, 0),
+                LocalDateTime.of(2026, 11, 10, 10, 0),
+                EventCategory.GENERAL,
+                EventSource.MANUAL
+        ));
+        repository.saveEvent(CalendarEvent.create(
+                "Future Event",
+                LocalDateTime.of(2026, 11, 25, 9, 0),
+                LocalDateTime.of(2026, 11, 25, 10, 0),
+                EventCategory.BUSY,
+                EventSource.MANUAL
+        ));
+        repository.saveRecurringRule(new RecurringRule(
+                0L,
+                "Work",
+                EnumSet.of(DayOfWeek.MONDAY),
+                LocalTime.of(8, 0),
+                LocalTime.of(17, 0),
+                EventCategory.WORK,
+                null,
+                null
+        ));
+        repository.saveGoal(new ScheduleGoal(0L, GoalType.WORKOUT, "Workout", 3, 60, 0, null, null));
+        repository.savePreferences(new SchedulePreferences(LocalTime.of(1, 0), 7));
+        repository.saveTheme("midnight");
+
+        assertEquals("midnight", repository.loadTheme());
+
+        int deletedPast = repository.deleteEventsEndingBefore(LocalDateTime.of(2026, 11, 20, 0, 0));
+        assertEquals(1, deletedPast);
+        assertEquals(1, repository.findAllEvents().size());
+
+        StorageStats statsBeforeReset = repository.getStorageStats();
+        assertEquals(1, statsBeforeReset.getEventCount());
+        assertEquals(1, statsBeforeReset.getRecurringRuleCount());
+        assertEquals(1, statsBeforeReset.getGoalCount());
+        assertTrue(statsBeforeReset.getDatabaseBytes() > 0L);
+
+        StorageStats afterReset = repository.clearAllCalendarData();
+        assertEquals(0, afterReset.getEventCount());
+        assertEquals(0, afterReset.getRecurringRuleCount());
+        assertEquals(0, afterReset.getGoalCount());
+        assertEquals(SchedulePreferences.DEFAULT_SLEEP_TIME, repository.loadPreferences().getSleepTime());
+        assertEquals("midnight", repository.loadTheme());
+    }
 }
