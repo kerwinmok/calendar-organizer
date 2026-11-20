@@ -1,7 +1,7 @@
 package com.calendarorganizer.ui;
 
+import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.service.CalendarService;
-import javafx.scene.control.Label;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.layout.BorderPane;
@@ -9,20 +9,21 @@ import javafx.scene.layout.BorderPane;
 public class MainWindow extends BorderPane {
 
     private final TabPane tabPane;
-    private final Tab coursesTab;
+    private final CourseTabView courseTabView;
 
-    public MainWindow(CalendarService calendarService) {
+    public MainWindow(CalendarService calendarService, CourseManager courseManager) {
         tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         Tab calendarTab = new Tab("Calendar", new CalendarTabView(calendarService));
-        coursesTab = new Tab("Courses", new Label("Course organizer loading..."));
+        courseTabView = new CourseTabView(courseManager);
+        Tab coursesTab = new Tab("Courses", courseTabView);
 
         tabPane.getTabs().addAll(calendarTab, coursesTab);
         setCenter(tabPane);
     }
 
-    public void setCoursesContent(javafx.scene.Node content) {
-        coursesTab.setContent(content);
+    public CourseTabView getCourseTabView() {
+        return courseTabView;
     }
 }
