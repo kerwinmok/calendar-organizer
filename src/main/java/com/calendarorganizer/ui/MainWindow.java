@@ -157,7 +157,7 @@ public class MainWindow extends BorderPane {
         MenuItem importFileItem = new MenuItem("Import .ics File...");
         importFileItem.setOnAction(e -> calendarTabView.importIcsFile());
         MenuItem pasteIcsItem = new MenuItem("Paste .ics Text...");
-        pasteIcsItem.setOnAction(e -> calendarTabView.pasteIcsText(activeTheme));
+        pasteIcsItem.setOnAction(e -> calendarTabView.pasteIcsText());
         MenuItem exportIcsItem = new MenuItem("Export .ics...");
         exportIcsItem.setOnAction(e -> calendarTabView.exportIcsFile());
         icsMenuBtn.getItems().setAll(importFileItem, pasteIcsItem, exportIcsItem);

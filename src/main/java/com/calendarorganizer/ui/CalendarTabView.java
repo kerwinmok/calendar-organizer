@@ -16,7 +16,6 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
-import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -31,7 +30,6 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
 import java.io.File;
-import java.net.URL;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -419,12 +417,12 @@ public class CalendarTabView extends BorderPane {
         startDaemon(task, "ics-import");
     }
 
-    public void pasteIcsText(UiTheme currentTheme) {
+    public void pasteIcsText() {
         Dialog<String> dialog = new Dialog<>();
         dialog.initOwner(getScene().getWindow());
         dialog.setTitle("Paste .ics Text");
         dialog.setHeaderText("Paste raw iCalendar (.ics) content below:");
-        applyDialogTheme(dialog.getDialogPane(), currentTheme);
+        activeTheme.applyToDialog(dialog.getDialogPane());
 
         TextArea area = new TextArea();
         area.setPrefRowCount(14);
@@ -577,20 +575,6 @@ public class CalendarTabView extends BorderPane {
 
     private void startDaemon(Task<?> task, String name) {
         CalendarService.backgroundExecutor().execute(task);
-    }
-
-    private void applyDialogTheme(DialogPane pane, UiTheme theme) {
-        URL cssUrl = CalendarTabView.class.getResource("/styles.css");
-        if (cssUrl != null) {
-            String urlStr = cssUrl.toExternalForm();
-            if (!pane.getStylesheets().contains(urlStr)) {
-                pane.getStylesheets().add(urlStr);
-            }
-        }
-        for (UiTheme candidate : UiTheme.values()) {
-            pane.getStyleClass().remove(candidate.getStyleClass());
-        }
-        pane.getStyleClass().add(theme.getStyleClass());
     }
 
     private String formatDays(RecurringRule rule) {

@@ -12,7 +12,6 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
-import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.SplitPane;
@@ -33,7 +32,6 @@ import javafx.stage.FileChooser;
 import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -375,7 +373,7 @@ public class CourseTabView extends BorderPane {
         dialog.setTitle("New Course");
         dialog.setHeaderText("Create a new course folder");
         dialog.setContentText("Course code/name (e.g. CMPT 201):");
-        applyDialogTheme(dialog.getDialogPane());
+        activeTheme.applyToDialog(dialog.getDialogPane());
 
         Optional<String> entered = dialog.showAndWait();
         if (entered.isEmpty()) {
@@ -399,7 +397,7 @@ public class CourseTabView extends BorderPane {
         confirm.initOwner(getScene().getWindow());
         confirm.setTitle("Delete Course");
         confirm.setHeaderText("Delete " + selectedCourse.getDisplayName() + " and all its files?");
-        applyDialogTheme(confirm.getDialogPane());
+        activeTheme.applyToDialog(confirm.getDialogPane());
 
         Optional<ButtonType> choice = confirm.showAndWait();
         if (choice.isEmpty() || choice.get() != ButtonType.OK) {
@@ -426,7 +424,7 @@ public class CourseTabView extends BorderPane {
         dialog.setTitle("New Markdown File");
         dialog.setHeaderText("New file in " + selectedCourse.getDisplayName() + " / " + selectedSection.getLabel());
         dialog.setContentText("File title (leave blank to auto-number):");
-        applyDialogTheme(dialog.getDialogPane());
+        activeTheme.applyToDialog(dialog.getDialogPane());
 
         Optional<String> entered = dialog.showAndWait();
         if (entered.isEmpty()) {
@@ -677,19 +675,5 @@ public class CourseTabView extends BorderPane {
         if (onStateChanged != null) {
             onStateChanged.run();
         }
-    }
-
-    private void applyDialogTheme(DialogPane pane) {
-        URL cssUrl = CourseTabView.class.getResource("/styles.css");
-        if (cssUrl != null) {
-            String urlStr = cssUrl.toExternalForm();
-            if (!pane.getStylesheets().contains(urlStr)) {
-                pane.getStylesheets().add(urlStr);
-            }
-        }
-        for (UiTheme candidate : UiTheme.values()) {
-            pane.getStyleClass().remove(candidate.getStyleClass());
-        }
-        pane.getStyleClass().add(activeTheme.getStyleClass());
     }
 }

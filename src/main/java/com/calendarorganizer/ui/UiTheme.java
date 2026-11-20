@@ -1,5 +1,9 @@
 package com.calendarorganizer.ui;
 
+import javafx.scene.control.DialogPane;
+
+import java.net.URL;
+
 public enum UiTheme {
     CHARCOAL("charcoal", "Charcoal (Dark)", "theme-charcoal"),
     MIDNIGHT("midnight", "Midnight (OLED Dark)", "theme-midnight"),
@@ -25,6 +29,20 @@ public enum UiTheme {
 
     public String getStyleClass() {
         return styleClass;
+    }
+
+    public void applyToDialog(DialogPane pane) {
+        URL cssUrl = UiTheme.class.getResource("/styles.css");
+        if (cssUrl != null) {
+            String urlStr = cssUrl.toExternalForm();
+            if (!pane.getStylesheets().contains(urlStr)) {
+                pane.getStylesheets().add(urlStr);
+            }
+        }
+        for (UiTheme candidate : values()) {
+            pane.getStyleClass().remove(candidate.getStyleClass());
+        }
+        pane.getStyleClass().add(styleClass);
     }
 
     public static UiTheme fromId(String rawId) {

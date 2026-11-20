@@ -19,7 +19,6 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.Window;
 
-import java.net.URL;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -53,7 +52,7 @@ public class SettingsDialog extends Dialog<Void> {
         setHeaderText("Appearance, Storage & Cleanup");
 
         DialogPane pane = getDialogPane();
-        applyDialogTheme(pane, currentTheme);
+        currentTheme.applyToDialog(pane);
         pane.getButtonTypes().add(ButtonType.CLOSE);
         pane.setPrefWidth(480);
 
@@ -74,7 +73,7 @@ public class SettingsDialog extends Dialog<Void> {
             if (chosen != null) {
                 activeTheme = chosen;
                 service.saveTheme(chosen.getId());
-                applyDialogTheme(getDialogPane(), chosen);
+                chosen.applyToDialog(getDialogPane());
                 onThemeChanged.accept(chosen);
                 feedbackLabel.setText("Theme set to " + chosen.getLabel() + ".");
             }
@@ -161,7 +160,7 @@ public class SettingsDialog extends Dialog<Void> {
         confirm.setTitle("Reset Calendar History & Settings");
         confirm.setHeaderText("Delete all calendar events, recurring rules, goals, and sleep settings?");
         confirm.setContentText("Your markdown course folders will stay intact.");
-        applyDialogTheme(confirm.getDialogPane(), activeTheme);
+        activeTheme.applyToDialog(confirm.getDialogPane());
 
         Optional<ButtonType> choice = confirm.showAndWait();
         if (choice.isEmpty() || choice.get() != ButtonType.OK) {
@@ -212,19 +211,5 @@ public class SettingsDialog extends Dialog<Void> {
         long usedMb = Math.round((rt.totalMemory() - rt.freeMemory()) / (1024.0 * 1024.0));
         long allocMb = Math.round(rt.totalMemory() / (1024.0 * 1024.0));
         memoryLabel.setText("Memory usage: " + usedMb + " MB used / " + allocMb + " MB allocated");
-    }
-
-    private void applyDialogTheme(DialogPane pane, UiTheme theme) {
-        URL cssUrl = SettingsDialog.class.getResource("/styles.css");
-        if (cssUrl != null) {
-            String urlStr = cssUrl.toExternalForm();
-            if (!pane.getStylesheets().contains(urlStr)) {
-                pane.getStylesheets().add(urlStr);
-            }
-        }
-        for (UiTheme candidate : UiTheme.values()) {
-            pane.getStyleClass().remove(candidate.getStyleClass());
-        }
-        pane.getStyleClass().add(theme.getStyleClass());
     }
 }

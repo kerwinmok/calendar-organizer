@@ -21,7 +21,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Window;
 
-import java.net.URL;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -55,7 +54,7 @@ public class EventDialog {
         }
 
         DialogPane pane = dialog.getDialogPane();
-        applyDialogTheme(pane, activeTheme);
+        activeTheme.applyToDialog(pane);
         pane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         pane.setPrefWidth(420);
 
@@ -138,7 +137,7 @@ public class EventDialog {
         dialog.setHeaderText("Edit Recurring Days & Timing");
 
         DialogPane pane = dialog.getDialogPane();
-        applyDialogTheme(pane, activeTheme);
+        activeTheme.applyToDialog(pane);
         pane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         pane.setPrefWidth(440);
 
@@ -290,19 +289,5 @@ public class EventDialog {
                 existing.getStartDate(),
                 existing.getEndDate()
         );
-    }
-
-    private static void applyDialogTheme(DialogPane pane, UiTheme theme) {
-        URL cssUrl = EventDialog.class.getResource("/styles.css");
-        if (cssUrl != null) {
-            String urlStr = cssUrl.toExternalForm();
-            if (!pane.getStylesheets().contains(urlStr)) {
-                pane.getStylesheets().add(urlStr);
-            }
-        }
-        for (UiTheme candidate : UiTheme.values()) {
-            pane.getStyleClass().remove(candidate.getStyleClass());
-        }
-        pane.getStyleClass().add(theme.getStyleClass());
     }
 }
