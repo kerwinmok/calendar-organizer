@@ -17,10 +17,12 @@
 - `DayParser`, `TimeRangeParser`, `RuleParser`, and `ParseResultMapper` parse plain schedule phrases offline.
 
 ## Milestone 5: LLM Provider Interface, Ollama, and Gemini (Completed)
+- `LlmProvider` interface with `OllamaProvider`, `GeminiProvider`, `ScheduleParserService`, and `RuleParser` fallback.
+
+## Milestone 6: Deterministic Scheduler (Completed)
 - **What works**:
-  - `LlmProvider` interface, `LlmPromptBuilder`, `LlmJsonParser`, and `LlmException`.
-  - `OllamaProvider` (`OLLAMA_HOST`, `OLLAMA_MODEL`) and `GeminiProvider` (`GEMINI_API_KEY`, `GEMINI_MODEL`).
-  - `ScheduleParserService` with `ParserMode` (`AUTO`, `RULES`, `OLLAMA`, `GEMINI`) and automatic fallback to `RuleParser`.
-  - `LlmJsonParserTest`, `OllamaProviderTest`, `GeminiProviderTest`, and `ScheduleParserServiceTest` pass using local HTTP server stubs.
+  - `TimeInterval` handles clipping, interval merging, and subtraction against day windows.
+  - `Scheduler` places workout and study sessions deterministically with zero overlaps across fixed events, recurring rules, midnight-crossing blocks, and sleep windows.
+  - `SchedulerTest` covers normal weeks, midnight-crossing events, completely booked days, full weeks, split study blocks, and varying sleep times.
 - **What's next**:
-  - Milestone 6: Deterministic `Scheduler` for workout, study, sleep, and fixed/recurring events with edge-case unit tests.
+  - Milestone 7: `CalendarService` and JavaFX week calendar UI with add-by-sentence, `.ics` import/export, and sidebar controls.
