@@ -33,11 +33,11 @@
 
 ## Milestone 10: Windows jpackage Build, Final Docs, and Review (Completed)
 - **What works**:
-  - `scripts/package-windows.ps1` builds a trimmed JDK 21 `jpackage` runtime image wrapped with `packaging/windows/SingleFileLauncher.cs` and custom `app-icon.ico` into a single all-in-one `target/dist/CalendarOrganizer.exe` with low-memory `SerialGC` + C1 + `-Dprism.order=sw` flags (`-Xms16m -Xmx128m`) and lazy `HttpClient` initialization.
-  - Double-clicking `CalendarOrganizer.exe` anywhere unpacks once into `%LOCALAPPDATA%\CalendarOrganizer` with a dark progress bar and launches straight from cache on subsequent runs, with optional portable data mode (`portable.txt`).
+  - `scripts/package-windows.ps1` builds a trimmed JDK 21 `jpackage --type app-image` bundle with custom `app-icon.ico` into `target/dist/CalendarOrganizer/CalendarOrganizer.exe` plus portable `target/dist/CalendarOrganizer-windows-x64.zip`, with optional `-Install -DesktopShortcut` deployment into `%LOCALAPPDATA%\Programs\CalendarOrganizer\` and low-memory `SerialGC` + C1 + `-Djava.awt.headless=true` + `-Dprism.order=sw` (`-Xms16m -Xmx128m`, Prism VRAM caps, lazy `CourseTabView`, bounded `AppExecutors`, and lazy `HttpClient` initialization).
+  - Double-clicking `Calendar Organizer` on the Desktop or extracting the portable archive launches the self-contained bundle with zero system Java install required.
   - LightCraft-inspired single-chrome UI (`MainWindow`, `SettingsDialog` with optional in-app Gemini/Ollama configuration, `UiTheme` with Charcoal/Midnight/Paper themes), static-grid coalesced `WeekGridView`, SQLite WAL + indexes + compaction (`VACUUM` / `PRAGMA optimize`), and one-click reset of calendar history and settings.
-  - `CalendarGridMath` and `EventFormValidator` back interactive calendar zooming, drag-to-create/move/resize, manual event editing, recurring rule editing, course sorting (`CourseSortOrder`), and built-in lecture previews (`CourseFilePreviewer` for single-page and cancellable `Render All` virtualized PDFs, `.pptx`, `.docx`, images, and plain text with automatic exit cleanup).
+  - `CalendarGridMath` and `EventFormValidator` back interactive calendar zooming, drag-to-create/move/resize, manual event editing, recurring rule editing, course sorting (`CourseSortOrder`), and built-in lecture previews (`CourseFilePreviewer`, `PdfRenderService`, `PdfPageCache`, `LectureRenderModel`, `LectureRenderPane` using in-process Apache PDFBox for lazy virtualized PDF page scrolling with zoom, `.pptx`, `.docx`, images, and plain text with automatic cache cleanup on switch/exit).
   - Both `mvn javafx:run` and the standalone `CalendarOrganizer.exe` launch on Windows cleanly.
-  - All 59 JUnit 5 tests pass.
+  - All 62 JUnit 5 tests pass.
 - **What's next**:
   - Ready for everyday use; set `$env:GEMINI_API_KEY` or run local Ollama optionally for LLM sentence parsing.

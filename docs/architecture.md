@@ -13,7 +13,7 @@
   - `ScheduleGoal`, `GoalType`, `SchedulePreferences`: workout/study targets and sleep window settings.
 - `com.calendarorganizer.storage`
   - `AppPaths`: resolves `%USERPROFILE%\.calendar-organizer` (with property and environment overrides).
-  - `DatabaseManager`: configures SQLite WAL mode, 2 MB cache cap (`cache_size = -2000`), in-memory temp store, and event range/source indexes (`idx_events_time`, `idx_events_source`).
+  - `DatabaseManager`: configures SQLite WAL mode, 1 MB cache cap (`cache_size = -1000`), in-memory temp store, and event range/source indexes (`idx_events_time`, `idx_events_source`).
   - `CalendarRepository`: CRUD, UID upsert for `.ics` imports, ISO-8601 range queries, generic key/value preference persistence (theme, Gemini key, Ollama host/model), past-event cleanup, full calendar reset, and `VACUUM`/`PRAGMA optimize` compaction.
   - `StorageStats`: immutable count and SQLite database byte-size snapshot.
 - `com.calendarorganizer.ics`
@@ -30,19 +30,20 @@
 - `com.calendarorganizer.scheduler`
   - `TimeInterval`, `ScheduleResult`, `Scheduler`: deterministic Java scheduler that merges fixed events, expanded recurring rules, and sleep windows, then places workout and study sessions without overlaps.
 - `com.calendarorganizer.service`
+  - `AppExecutors`: bounded core-expiring daemon pools (`ioExecutor` and `renderExecutor`) with application-exit `shutdown()`.
   - `CalendarService`, `ApplySentenceResult`, `IcsImportSummary`: orchestrates parsing, persistence, automatic rescheduling, and `.ics` import/export.
 - `com.calendarorganizer.course`
   - `Course`, `CourseSection`, `CourseItem`, `CourseSortOrder`, `CourseManager`: disk-backed course folders sorted numerically by course number, with safe file naming, natural or timing-based file sorting (`NAME_ASC`, `NAME_DESC`, `NEWEST_FIRST`, `OLDEST_FIRST`), and monotonic timestamps on imported files.
-  - `CourseFilePreviewer`: built-in zero-dependency preview extractor/renderer for PDFs (single-page and cancellable streaming all-page rendering via Windows `Windows.Data.Pdf`, with session cache cleanup), `.pptx` slides/notes/thumbnails, `.docx`, bounded text, and images.
+  - `PdfPageCache`, `PdfRenderService`, `LectureRenderModel`, `CourseFilePreviewer`: built-in preview extractor/renderer for PDFs (in-process Apache PDFBox 3.0.8 with `setupTempFileOnly`, 1 open-document handle, 8 MB LRU `WritableImage` page cache, headless AWT, and aspect-ratio page slot metadata), `.pptx` slides/notes/thumbnails, `.docx`, bounded text, and images.
   - `CourseExporter`: exports one course or all courses to a `.zip` with normalized `.md` files, `README.md`, and `combined.md`.
 - `com.calendarorganizer.ui`
   - `UiTheme`: `CHARCOAL` (default dark), `MIDNIGHT` (near-black dark), and `PAPER` (light) theme definitions.
-  - `MainWindow`: unified LightCraft-inspired chrome with top command bar, bottom status/navigation bar, collapsible panels, and `Calendar`/`Courses` mode switching.
+  - `MainWindow`: unified LightCraft-inspired chrome with top command bar, bottom status/navigation bar, collapsible panels, lazy `CourseTabView` initialization, and `Calendar`/`Courses` mode switching with transient preview cleanup.
   - `CalendarTabView`, `WeekGridView`, `CalendarGridMath`, `EventDialog`, `EventFormValidator`: 7-day x 24-hour calendar canvas with `Ctrl + Scroll` zooming, static hour gridlines, coalesced resize relayout, smooth wheel scrolling, current-time indicator, drag-to-create on empty slots, drag-to-move/resize on event cards, manual event and recurring-rule editing dialogs with form validation, `.ics` background tasks, and collapsible right inspector.
-  - `CourseTabView`: three-pane course list with top-bar filtering, segmented section switch (`Lectures`, `Notes`, `Coursework`), persisted alphabetical/timing file sort selector, markdown editor with automatic flush on navigation/close, built-in PDF (single-page or virtualized `Render All` with `Stop` and exit cleanup), `.pptx`, `.docx`, image, and text previewer, background drag-and-drop imports, native Windows open/folder launch, and background `.zip` exports.
+  - `CourseTabView`, `LectureRenderPane`: lazily loaded three-pane course browser with top-bar filtering, segmented section switch (`Lectures`, `Notes`, `Coursework`), persisted alphabetical/timing file sort selector, markdown editor with automatic flush on navigation/close, lazy virtualized PDF page viewer (`PdfPageSlot` + `-` / `+` / `Fit` / `Ctrl + Scroll` zoom and automatic cache release on switch/exit), `.pptx`, `.docx`, image, and text previewer, background drag-and-drop imports, native Windows open/folder launch, and background `.zip` exports.
   - `SettingsDialog`: theme switcher, optional in-app Gemini API key and Ollama configuration, storage and JVM memory readout, `Clear Past Events`, `Clear Scheduled Sessions`, `Optimize & Compact Database`, and `Reset All Calendar History & Settings`.
 - Windows Packaging (`packaging/windows` & `scripts/package-windows.ps1`)
-  - `SingleFileLauncher.cs` + `app-icon.ico`: compiles a standalone x64 WinForms stub with an appended compressed `jpackage` payload and 40-byte `CALORG01` footer into a single `target/dist/CalendarOrganizer.exe`, extracting once by content hash into `%LOCALAPPDATA%\CalendarOrganizer\app-<stamp>`, supporting optional `portable.txt` / `calendar-organizer-data`, and launching directly from cache thereafter.
+  - `app-icon.ico` + `scripts/package-windows.ps1`: builds a trimmed JDK 21 `jpackage --type app-image` bundle (`target/dist/CalendarOrganizer/CalendarOrganizer.exe`) and portable `target/dist/CalendarOrganizer-windows-x64.zip`, with optional `-Install -DesktopShortcut` deployment to `%LOCALAPPDATA%\Programs\CalendarOrganizer\`.
 
 ## Data Flow
 1. **Calendar Input -> Schedule**: Sentence input -> `CalendarService.applySentence` -> `ScheduleParserService` (`GeminiProvider` / `OllamaProvider` / `RuleParser`) -> `ParseResultMapper` -> SQLite (`CalendarRepository`) -> `Scheduler.scheduleWeek` -> non-overlapping `SCHEDULED` events persisted -> `WeekGridView` refreshes.

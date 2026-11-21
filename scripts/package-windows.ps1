@@ -1,3 +1,8 @@
+param(
+    [switch]$Install,
+    [switch]$DesktopShortcut
+)
+
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -19,16 +24,12 @@ try {
     if (-not (Test-Path $iconPath)) {
         throw "Expected icon not found at $iconPath"
     }
-    $launcherSource = Join-Path $projectRoot "packaging\windows\SingleFileLauncher.cs"
-    if (-not (Test-Path $launcherSource)) {
-        throw "Expected launcher source not found at $launcherSource"
-    }
 
-    $stageDir = Join-Path $projectRoot "target\jpackage-stage"
-    if (Test-Path $stageDir) {
-        Remove-Item -Recurse -Force $stageDir
+    $distDir = Join-Path $projectRoot "target\dist"
+    if (Test-Path $distDir) {
+        Remove-Item -Recurse -Force $distDir
     }
-    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
     & jpackage `
         --type app-image `
@@ -53,89 +54,52 @@ try {
         --java-options "-Dprism.maxvram=32m" `
         --java-options "-Dprism.targetvram=16m" `
         --java-options "--enable-native-access=ALL-UNNAMED" `
-        --dest $stageDir
+        --dest $distDir
 
     if ($LASTEXITCODE -ne 0) {
         throw "jpackage failed"
     }
 
-    $stageAppDir = Join-Path $stageDir "CalendarOrganizer"
-    $payloadZip = Join-Path $stageDir "payload.zip"
+    $appDir = Join-Path $distDir "CalendarOrganizer"
+    $zipPath = Join-Path $distDir "CalendarOrganizer-windows-x64.zip"
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
-        $stageAppDir,
-        $payloadZip,
+        $appDir,
+        $zipPath,
         [System.IO.Compression.CompressionLevel]::Optimal,
-        $false
+        $true
     )
 
-    $hashHex = (Get-FileHash -Path $payloadZip -Algorithm SHA256).Hash.ToLowerInvariant()
-    $stamp = $hashHex.Substring(0, 16)
+    $zipSizeMb = [Math]::Round(((Get-Item $zipPath).Length / 1MB), 1)
+    Write-Output "Packaged standalone app-image at: $appDir"
+    Write-Output "Packaged portable archive at: $zipPath ($zipSizeMb MB)"
 
-    $cscExe = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-    if (-not (Test-Path $cscExe)) {
-        throw ".NET Framework csc.exe not found at $cscExe"
-    }
+    if ($Install) {
+        Stop-Process -Name CalendarOrganizer -Force -ErrorAction SilentlyContinue
 
-    $stubExe = Join-Path $stageDir "launcher-stub.exe"
-    & $cscExe `
-        /nologo `
-        /target:winexe `
-        /platform:x64 `
-        /optimize+ `
-        "/win32icon:$iconPath" `
-        /r:System.IO.Compression.dll `
-        /r:System.IO.Compression.FileSystem.dll `
-        /r:System.Windows.Forms.dll `
-        /r:System.Drawing.dll `
-        "/out:$stubExe" `
-        $launcherSource
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "csc launcher compilation failed"
-    }
-
-    $distDir = Join-Path $projectRoot "target\dist"
-    if (Test-Path $distDir) {
-        Remove-Item -Recurse -Force $distDir
-    }
-    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-
-    $finalExe = Join-Path $distDir "CalendarOrganizer.exe"
-    $stubLength = (Get-Item $stubExe).Length
-    $payloadLength = (Get-Item $payloadZip).Length
-
-    $outStream = [System.IO.File]::Create($finalExe)
-    try {
-        $stubStream = [System.IO.File]::OpenRead($stubExe)
-        try {
-            $stubStream.CopyTo($outStream)
-        } finally {
-            $stubStream.Dispose()
+        $installDir = Join-Path $env:LOCALAPPDATA "Programs\CalendarOrganizer"
+        if (Test-Path $installDir) {
+            Remove-Item -Recurse -Force $installDir
         }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $installDir) | Out-Null
+        Copy-Item -Path $appDir -Destination $installDir -Recurse -Force
 
-        $zipStream = [System.IO.File]::OpenRead($payloadZip)
-        try {
-            $zipStream.CopyTo($outStream)
-        } finally {
-            $zipStream.Dispose()
-        }
+        $installedExe = Join-Path $installDir "CalendarOrganizer.exe"
+        Write-Output "Installed application to: $installedExe"
 
-        $writer = New-Object System.IO.BinaryWriter($outStream, [System.Text.Encoding]::ASCII, $true)
-        try {
-            $writer.Write([System.Text.Encoding]::ASCII.GetBytes($stamp))
-            $writer.Write([Int64]$stubLength)
-            $writer.Write([Int64]$payloadLength)
-            $writer.Write([System.Text.Encoding]::ASCII.GetBytes("CALORG01"))
-        } finally {
-            $writer.Dispose()
+        if ($DesktopShortcut) {
+            $desktopDir = [Environment]::GetFolderPath("Desktop")
+            $lnkPath = Join-Path $desktopDir "Calendar Organizer.lnk"
+            $wsh = New-Object -ComObject WScript.Shell
+            $shortcut = $wsh.CreateShortcut($lnkPath)
+            $shortcut.TargetPath = $installedExe
+            $shortcut.WorkingDirectory = $installDir
+            $shortcut.IconLocation = "$installedExe,0"
+            $shortcut.Description = "Calendar Organizer"
+            $shortcut.Save()
+            Write-Output "Updated Desktop shortcut: $lnkPath"
         }
-    } finally {
-        $outStream.Dispose()
     }
-
-    $sizeMb = [Math]::Round(((Get-Item $finalExe).Length / 1MB), 1)
-    Write-Output "Packaged single-file executable at: $finalExe ($sizeMb MB)"
 } finally {
     Pop-Location
 }

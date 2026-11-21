@@ -3,7 +3,7 @@
 A local-first Windows desktop app in two parts:
 
 1. **Calendar Builder**: Enter plain sentences like `"i work mon-thurs 7-6pm"` or `"i want to work out and study, i'm busy at 8pm for 2 hours, and i want to sleep at 12"`. Fixed blocks, recurring blocks, sleep hours, and workout/study goals are saved locally in SQLite and scheduled deterministically without overlaps. You can also **manually add, edit, and adjust timings like Google Calendar**: click-and-drag (or double-click) any empty slot to create an event, drag existing events up/down to move them, drag an event's bottom edge to resize its duration, double-click any event or recurring rule to edit its details, and hold **`Ctrl + Scroll`** to zoom the calendar grid in and out. Supports importing Google Calendar `.ics` exports (from file or pasted text) and exporting back to `.ics`.
-2. **Course Organizer**: Organizes courses numerically by course number (for example `MATH 99`, `CMPT 201`, `STAT 201`, `CMPT 1000`) with real disk folders (`courses/CMPT-201/lectures/`, `notes/`, `coursework/`). Supports writing markdown notes, **dragging & dropping PowerPoint (`.pptx`/`.ppt`), PDF (`.pdf`), Word (`.docx`), or image files** directly into a course section, sorting files **alphabetically (A-Z / Z-A) or by timing (Newest first / Oldest first)**, **in-app built-in previews** (rendered PDF pages with `< Prev` / `Next >` stepping plus **Render All** / **Stop** continuous virtualized viewing that automatically cancels and cleans cache on switch or exit, extracted `.pptx` slides + speaker notes + thumbnail, `.docx`/text preview, and image preview), plus one-click **Open File** and **Open Folder** buttons. Exports a single course or all courses into a `.zip` of clean markdown (`README.md`, normalized per-section `.md` files, and `combined.md`) ready to pass to another LLM for studying.
+2. **Course Organizer**: Organizes courses numerically by course number (for example `MATH 99`, `CMPT 201`, `STAT 201`, `CMPT 1000`) with real disk folders (`courses/CMPT-201/lectures/`, `notes/`, `coursework/`). Supports writing markdown notes, **dragging & dropping PowerPoint (`.pptx`/`.ppt`), PDF (`.pdf`), Word (`.docx`), or image files** directly into a course section, sorting files **alphabetically (A-Z / Z-A) or by timing (Newest first / Oldest first)**, **in-app built-in previews** (lazy virtualized PDF page scrolling with `< Prev` / `Next >` navigation, `-` / `+` / `Fit` and `Ctrl + Scroll` zoom, and automatic cache release on tab switch or exit, plus extracted `.pptx` slides + speaker notes + thumbnail, `.docx`/text preview, and image preview), plus one-click **Open File** and **Open Folder** buttons. Exports a single course or all courses into a `.zip` of clean markdown (`README.md`, normalized per-section `.md` files, and `combined.md`) ready to pass to another LLM for studying.
 
 ## Screenshots
 
@@ -21,20 +21,23 @@ Open **Settings** from the top-right bar to:
 - Inspect live SQLite counts, database disk size, and memory usage.
 - Run **Clear Past Events**, **Clear Scheduled Sessions**, **Optimize & Compact Database** (`VACUUM` + `PRAGMA optimize`), or **Reset All Calendar History & Settings** (which leaves your course folders and saved AI/theme preferences untouched).
 
-## All-in-One Standalone `.exe` (Windows)
+## Standalone Windows Bundle & Desktop Install
 
-Build or copy **one file** — `CalendarOrganizer.exe` (~45 MB) — anywhere on Windows and double-click it to run immediately (no Java install, no zip extraction, no terminal required):
+Build the self-contained Windows app bundle (no system Java installation required) with either option:
 
-- **First launch**: Shows a short dark splash bar while unpacking the bundled Java 21 + JavaFX runtime into `$env:LOCALAPPDATA\CalendarOrganizer\app-<stamp>`.
-- **Later launches**: Launches directly from the cached runtime immediately and exits the wrapper right away.
-- **Optional portable data mode**: Place an empty `portable.txt` file (or a `calendar-organizer-data\` folder) next to `CalendarOrganizer.exe` to keep `calendar.db` and `courses\` beside the `.exe` on a USB drive or synced folder.
+- **One-command per-user install + Desktop shortcut**:
+  ```powershell
+  .\scripts\package-windows.ps1 -Install -DesktopShortcut
+  ```
+  Installs the bundled app into `$env:LOCALAPPDATA\Programs\CalendarOrganizer\` and creates/updates the **Calendar Organizer** shortcut on your Desktop.
+- **Portable archive**:
+  `.\scripts\package-windows.ps1` outputs `target\dist\CalendarOrganizer\CalendarOrganizer.exe` and `target\dist\CalendarOrganizer-windows-x64.zip` (~48.7 MB), which can be extracted anywhere on Windows 10/11 (x64) and launched directly.
 
 ## Requirements (Building from Source)
 
 - Windows 10 or Windows 11 (x64)
 - Java 21 JDK (including `jpackage`)
 - Apache Maven 3.9+
-- Windows `.NET Framework 4.x` (`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`, built into Windows 10/11)
 
 ## Build and Run Tests (PowerShell)
 
@@ -70,15 +73,22 @@ $env:OLLAMA_MODEL = "llama3.2"
 mvn javafx:run
 ```
 
-## Package Standalone `.exe` for Windows (PowerShell)
+## Package Standalone App for Windows (PowerShell)
 
+Build the app-image and portable archive:
 ```powershell
 .\scripts\package-windows.ps1
 ```
 
-This runs `mvn clean package`, builds a trimmed `jpackage` runtime image with custom app icon, compresses the runtime payload, compiles the native Windows launcher stub (`packaging\windows\SingleFileLauncher.cs`), and outputs a single self-contained executable at:
+Build, install to `$env:LOCALAPPDATA\Programs\CalendarOrganizer\`, and create the Desktop shortcut:
 ```powershell
-.\target\dist\CalendarOrganizer.exe
+.\scripts\package-windows.ps1 -Install -DesktopShortcut
+```
+
+This runs `mvn clean package`, builds a trimmed JDK 21 `jpackage` app-image with custom app icon, and outputs both the runnable bundle folder and a portable `.zip` archive:
+```powershell
+.\target\dist\CalendarOrganizer\CalendarOrganizer.exe
+.\target\dist\CalendarOrganizer-windows-x64.zip
 ```
 
 ## Local Data Storage
