@@ -30,6 +30,8 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -193,5 +195,20 @@ class CalendarServiceTest {
 
         realService.saveOllamaSettings("", "");
         assertEquals(OllamaProvider.DEFAULT_MODEL, realService.loadOllamaModel());
+    }
+
+    @Test
+    void appliesSentenceInAutoModeOnBackgroundExecutorWithoutDeadlock(@TempDir Path tempDir) throws Exception {
+        DatabaseManager db = new DatabaseManager(tempDir.resolve("deadlock.db"));
+        db.initialize();
+        CalendarService realService = new CalendarService(new CalendarRepository(db));
+        realService.saveOllamaSettings("http://127.0.0.1:1", "llama3.2");
+
+        CompletableFuture<ApplySentenceResult> future = CompletableFuture.supplyAsync(
+                () -> realService.applySentence("i work mon-thurs 7-6pm", MONDAY, ParserMode.AUTO),
+                CalendarService.backgroundExecutor()
+        );
+        ApplySentenceResult result = future.get(8, TimeUnit.SECONDS);
+        assertEquals(1, result.getAddedRules());
     }
 }

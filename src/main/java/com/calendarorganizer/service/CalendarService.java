@@ -33,6 +33,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 public class CalendarService {
 
@@ -45,6 +48,8 @@ public class CalendarService {
         thread.setDaemon(true);
         return thread;
     });
+
+    private static final Executor HTTP_EXECUTOR = createHttpExecutor();
 
     private final CalendarRepository repository;
     private final ScheduleParserService parserService;
@@ -68,10 +73,27 @@ public class CalendarService {
         );
     }
 
+    private static Executor createHttpExecutor() {
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(
+                1,
+                2,
+                30L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "calendar-http-worker");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+        );
+        pool.allowCoreThreadTimeOut(true);
+        return pool;
+    }
+
     private static ScheduleParserService createSharedParserService(CalendarRepository repository) {
         HttpClient sharedClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
-                .executor(SHARED_BG_EXECUTOR)
+                .executor(HTTP_EXECUTOR)
                 .build();
         return new ScheduleParserService(
                 new RuleParser(),
