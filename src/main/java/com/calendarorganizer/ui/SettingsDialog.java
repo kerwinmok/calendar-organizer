@@ -24,11 +24,13 @@ import javafx.stage.Window;
 
 import java.time.LocalDate;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 public class SettingsDialog extends Dialog<Void> {
 
     private final CalendarService service;
+    private final BooleanSupplier systemDarkSupplier;
     private final Consumer<UiTheme> onThemeChanged;
     private final Runnable onDataChanged;
     private final Consumer<String> onStatus;
@@ -43,11 +45,13 @@ public class SettingsDialog extends Dialog<Void> {
     public SettingsDialog(Window owner,
                           CalendarService service,
                           UiTheme currentTheme,
+                          BooleanSupplier systemDarkSupplier,
                           Consumer<UiTheme> onThemeChanged,
                           Runnable onDataChanged,
                           Consumer<String> onStatus) {
         this.service = service;
         this.activeTheme = currentTheme;
+        this.systemDarkSupplier = systemDarkSupplier != null ? systemDarkSupplier : () -> true;
         this.onThemeChanged = onThemeChanged;
         this.onDataChanged = onDataChanged;
         this.onStatus = onStatus;
@@ -57,7 +61,7 @@ public class SettingsDialog extends Dialog<Void> {
         setHeaderText("Appearance, AI Parsing & Cleanup");
 
         DialogPane pane = getDialogPane();
-        currentTheme.applyToDialog(pane);
+        WindowsTitleBar.styleDialog(this, currentTheme.resolve(this.systemDarkSupplier.getAsBoolean()));
         pane.getButtonTypes().add(ButtonType.CLOSE);
         pane.setPrefSize(500, 560);
 
@@ -83,7 +87,7 @@ public class SettingsDialog extends Dialog<Void> {
             if (chosen != null) {
                 activeTheme = chosen;
                 service.saveTheme(chosen.getId());
-                chosen.applyToDialog(getDialogPane());
+                chosen.applyToDialog(getDialogPane(), systemDarkSupplier.getAsBoolean());
                 onThemeChanged.accept(chosen);
                 feedbackLabel.setText("Theme set to " + chosen.getLabel() + ".");
             }
@@ -230,7 +234,7 @@ public class SettingsDialog extends Dialog<Void> {
         confirm.setTitle("Reset Calendar History & Settings");
         confirm.setHeaderText("Delete all calendar events, recurring rules, goals, and sleep settings?");
         confirm.setContentText("Your markdown course folders will stay intact.");
-        activeTheme.applyToDialog(confirm.getDialogPane());
+        WindowsTitleBar.styleDialog(confirm, activeTheme.resolve(systemDarkSupplier.getAsBoolean()));
 
         Optional<ButtonType> choice = confirm.showAndWait();
         if (choice.isEmpty() || choice.get() != ButtonType.OK) {
@@ -268,6 +272,10 @@ public class SettingsDialog extends Dialog<Void> {
             }
         });
         CalendarService.backgroundExecutor().execute(task);
+    }
+
+    public void refreshResolvedTheme(boolean systemDark) {
+        activeTheme.applyToDialog(getDialogPane(), systemDark);
     }
 
     private void refreshAiStatus() {

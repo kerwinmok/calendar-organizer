@@ -50,7 +50,7 @@ public class EventDialog {
         }
 
         DialogPane pane = dialog.getDialogPane();
-        activeTheme.applyToDialog(pane);
+        WindowsTitleBar.styleDialog(dialog, activeTheme);
         pane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         pane.setPrefWidth(420);
 
@@ -151,7 +151,7 @@ public class EventDialog {
         dialog.setHeaderText("Edit Recurring Days & Timing");
 
         DialogPane pane = dialog.getDialogPane();
-        activeTheme.applyToDialog(pane);
+        WindowsTitleBar.styleDialog(dialog, activeTheme);
         pane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         pane.setPrefWidth(440);
 

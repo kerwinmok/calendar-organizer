@@ -734,7 +734,7 @@ public class CourseTabView extends BorderPane {
         dialog.setTitle("New Course");
         dialog.setHeaderText("Create a new course folder");
         dialog.setContentText("Course code/name (e.g. CMPT 201):");
-        activeTheme.applyToDialog(dialog.getDialogPane());
+        WindowsTitleBar.styleDialog(dialog, activeTheme);
 
         Optional<String> entered = dialog.showAndWait();
         if (entered.isEmpty()) {
@@ -757,7 +757,7 @@ public class CourseTabView extends BorderPane {
         confirm.initOwner(getScene().getWindow());
         confirm.setTitle("Delete Course");
         confirm.setHeaderText("Delete " + selectedCourse.getDisplayName() + " and all its files?");
-        activeTheme.applyToDialog(confirm.getDialogPane());
+        WindowsTitleBar.styleDialog(confirm, activeTheme);
 
         Optional<ButtonType> choice = confirm.showAndWait();
         if (choice.isEmpty() || choice.get() != ButtonType.OK) {
@@ -785,7 +785,7 @@ public class CourseTabView extends BorderPane {
         dialog.setTitle("New Markdown File");
         dialog.setHeaderText("New file in " + selectedCourse.getDisplayName() + " / " + selectedSection.getLabel());
         dialog.setContentText("File title (leave blank to auto-number):");
-        activeTheme.applyToDialog(dialog.getDialogPane());
+        WindowsTitleBar.styleDialog(dialog, activeTheme);
 
         Optional<String> entered = dialog.showAndWait();
         if (entered.isEmpty()) {

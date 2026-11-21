@@ -8,6 +8,7 @@ import com.calendarorganizer.storage.CalendarRepository;
 import com.calendarorganizer.storage.DatabaseManager;
 import com.calendarorganizer.ui.MainWindow;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
@@ -42,6 +43,14 @@ public class MainApp extends Application {
         loadAppIcon(stage);
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> root.shutdown());
+        stage.setOpacity(0.0);
+        stage.setOnShown(e -> {
+            root.applyNativeTitleBar();
+            Platform.runLater(() -> {
+                root.applyNativeTitleBar();
+                stage.setOpacity(1.0);
+            });
+        });
         stage.show();
     }
 

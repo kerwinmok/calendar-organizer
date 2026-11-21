@@ -431,7 +431,7 @@ public class CalendarTabView extends BorderPane {
         dialog.initOwner(getScene().getWindow());
         dialog.setTitle("Paste .ics Text");
         dialog.setHeaderText("Paste raw iCalendar (.ics) content below:");
-        activeTheme.applyToDialog(dialog.getDialogPane());
+        WindowsTitleBar.styleDialog(dialog, activeTheme);
 
         TextArea area = new TextArea();
         area.setPrefRowCount(14);

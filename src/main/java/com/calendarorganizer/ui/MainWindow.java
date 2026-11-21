@@ -71,6 +71,9 @@ public class MainWindow extends BorderPane {
     private final Label statsPill = new Label();
 
     private UiTheme activeTheme;
+    private final WindowsThemeDetector themeDetector;
+    private volatile boolean systemDarkMode;
+    private SettingsDialog openSettingsDialog;
     private boolean showingCalendar = true;
     private double savedSplitDivider = 0.50;
     private boolean renderFullScreen;
@@ -84,6 +87,9 @@ public class MainWindow extends BorderPane {
         this.courseExporter = courseExporter;
         this.calendarTabView = new CalendarTabView(calendarService);
         this.activeTheme = UiTheme.fromId(calendarService.loadTheme());
+        this.themeDetector = new WindowsThemeDetector(this::handleSystemThemeChanged);
+        this.systemDarkMode = themeDetector.isDarkMode();
+        this.themeDetector.start();
 
         this.calendarCommandBox = buildCalendarCommandBox();
         this.courseCommandBox = buildCourseCommandBox();
@@ -116,7 +122,7 @@ public class MainWindow extends BorderPane {
     private CourseTabView ensureCourseTabView() {
         if (courseTabView == null) {
             CourseTabView view = new CourseTabView(courseManager, courseExporter);
-            view.setActiveTheme(activeTheme);
+            view.setActiveTheme(getResolvedTheme());
             view.setOnStatusChanged(this::updateStatus);
             view.setOnStateChanged(this::refreshCourseFooterUi);
             view.setOnRenderRequested(this::openRenderPane);
@@ -452,6 +458,7 @@ public class MainWindow extends BorderPane {
                 getScene().getWindow(),
                 calendarService,
                 activeTheme,
+                () -> systemDarkMode,
                 this::applyTheme,
                 () -> {
                     calendarTabView.clearSelection();
@@ -460,7 +467,12 @@ public class MainWindow extends BorderPane {
                 },
                 this::updateStatus
         );
-        dialog.showAndWait();
+        this.openSettingsDialog = dialog;
+        try {
+            dialog.showAndWait();
+        } finally {
+            this.openSettingsDialog = null;
+        }
     }
 
     public void flushPendingEdits() {
@@ -477,18 +489,43 @@ public class MainWindow extends BorderPane {
         if (courseTabView != null) {
             courseTabView.shutdownPreviewer();
         }
+        themeDetector.close();
         AppExecutors.shutdown();
+    }
+
+    public UiTheme getResolvedTheme() {
+        return activeTheme.resolve(systemDarkMode);
+    }
+
+    public void applyNativeTitleBar() {
+        WindowsTitleBar.applyToAllProcessWindows(getResolvedTheme());
+    }
+
+    private void handleSystemThemeChanged(boolean nextDark) {
+        this.systemDarkMode = nextDark;
+        Platform.runLater(() -> {
+            if (activeTheme == UiTheme.SYSTEM) {
+                applyTheme(UiTheme.SYSTEM);
+                if (openSettingsDialog != null) {
+                    openSettingsDialog.refreshResolvedTheme(nextDark);
+                }
+            }
+        });
     }
 
     public void applyTheme(UiTheme theme) {
         this.activeTheme = theme;
+        UiTheme resolved = theme.resolve(systemDarkMode);
         for (UiTheme candidate : UiTheme.values()) {
             getStyleClass().remove(candidate.getStyleClass());
         }
-        getStyleClass().add(theme.getStyleClass());
-        calendarTabView.setActiveTheme(theme);
+        getStyleClass().add(resolved.getStyleClass());
+        calendarTabView.setActiveTheme(resolved);
         if (courseTabView != null) {
-            courseTabView.setActiveTheme(theme);
+            courseTabView.setActiveTheme(resolved);
+        }
+        if (getScene() != null && getScene().getWindow() != null && getScene().getWindow().isShowing()) {
+            applyNativeTitleBar();
         }
     }
 

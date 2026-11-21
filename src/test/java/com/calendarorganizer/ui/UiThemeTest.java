@@ -38,6 +38,10 @@ class UiThemeTest {
         assertEquals(UiTheme.SYSTEM, UiTheme.fromId("system"));
         assertEquals(UiTheme.PAPER, UiTheme.fromId("paper"));
         assertEquals(UiTheme.MIDNIGHT, UiTheme.fromId("midnight"));
+
+        assertEquals(0x002d2d2d, WindowsTitleBar.rgbToColorRef(0x2d, 0x2d, 0x2d));
+        assertEquals(0x00dd6501, WindowsTitleBar.rgbToColorRef(0x01, 0x65, 0xdd));
+        assertEquals(0x00fafafa, WindowsTitleBar.rgbToColorRef(0xfa, 0xfa, 0xfa));
     }
 
     @Test
