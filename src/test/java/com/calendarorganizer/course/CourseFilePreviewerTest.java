@@ -8,7 +8,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -111,6 +115,90 @@ class CourseFilePreviewerTest {
         assertEquals(1, rendered.getTotalPages());
         assertTrue(Files.isRegularFile(rendered.getPngPath()));
         assertTrue(Files.size(rendered.getPngPath()) > 500L);
+    }
+
+    @Test
+    void rendersAllPdfPagesAndStopsEarlyOnCancel(@TempDir Path tempDir) throws IOException {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        Assumptions.assumeTrue(os.contains("win"));
+
+        Path pdf = createMultiPageSamplePdf(tempDir.resolve("five-pages.pdf"), 5);
+        Path fullOut = tempDir.resolve("full");
+        AtomicInteger reportedTotal = new AtomicInteger(0);
+        List<Path> renderedPages = new ArrayList<>();
+
+        previewer.renderAllPdfPages(
+                pdf,
+                700,
+                fullOut,
+                new AtomicBoolean(false),
+                reportedTotal::set,
+                (idx, path) -> renderedPages.add(path)
+        );
+
+        assertEquals(5, reportedTotal.get());
+        assertEquals(5, renderedPages.size());
+        for (Path png : renderedPages) {
+            assertTrue(Files.isRegularFile(png));
+            assertTrue(Files.size(png) > 500L);
+        }
+
+        Path cancelOut = tempDir.resolve("cancelled");
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        AtomicInteger stoppedCount = new AtomicInteger(0);
+
+        previewer.renderAllPdfPages(
+                pdf,
+                700,
+                cancelOut,
+                cancelled,
+                t -> {
+                },
+                (idx, path) -> {
+                    stoppedCount.incrementAndGet();
+                    cancelled.set(true);
+                    previewer.cancelActivePdfRender();
+                }
+        );
+
+        assertEquals(1, stoppedCount.get());
+    }
+
+    private Path createMultiPageSamplePdf(Path target, int pageCount) throws IOException {
+        List<String> objs = new ArrayList<>();
+        StringBuilder kids = new StringBuilder();
+        for (int i = 0; i < pageCount; i++) {
+            if (i > 0) {
+                kids.append(' ');
+            }
+            kids.append(3 + i).append(" 0 R");
+        }
+        int contentId = 3 + pageCount;
+        int fontId = contentId + 1;
+        objs.add("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        objs.add("2 0 obj << /Type /Pages /Kids [" + kids + "] /Count " + pageCount + " >> endobj\n");
+        for (int i = 0; i < pageCount; i++) {
+            objs.add((3 + i) + " 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    + "/Contents " + contentId + " 0 R /Resources << /Font << /F1 " + fontId + " 0 R >> >> >> endobj\n");
+        }
+        objs.add(contentId + " 0 obj << /Length 49 >> stream\nBT /F1 24 Tf 72 700 Td (CMPT 201 Lecture) Tj ET\nendstream endobj\n");
+        objs.add(fontId + " 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n");
+
+        StringBuilder pdf = new StringBuilder("%PDF-1.4\n");
+        List<Integer> offsets = new ArrayList<>();
+        for (String obj : objs) {
+            offsets.add(pdf.length());
+            pdf.append(obj);
+        }
+        int xrefPos = pdf.length();
+        pdf.append("xref\n0 ").append(objs.size() + 1).append("\n0000000000 65535 f \n");
+        for (int offset : offsets) {
+            pdf.append(String.format("%010d 00000 n \n", offset));
+        }
+        pdf.append("trailer << /Size ").append(objs.size() + 1).append(" /Root 1 0 R >>\nstartxref\n")
+                .append(xrefPos).append("\n%%EOF\n");
+        Files.writeString(target, pdf.toString(), StandardCharsets.US_ASCII);
+        return target;
     }
 
     private String slideXml(String text) {
