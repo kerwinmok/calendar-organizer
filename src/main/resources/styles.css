@@ -698,3 +698,16 @@
 .markdown-editor .content {
     -fx-background-color: -lc-grid-bg;
 }
+
+.pdf-pages-list {
+    -fx-background-color: -lc-grid-bg;
+    -fx-border-color: transparent;
+    -fx-padding: 0;
+}
+
+.pdf-pages-list .list-cell,
+.pdf-pages-list .list-cell:filled:hover,
+.pdf-pages-list .list-cell:filled:selected {
+    -fx-background-color: transparent;
+    -fx-padding: 6 8 6 8;
+}

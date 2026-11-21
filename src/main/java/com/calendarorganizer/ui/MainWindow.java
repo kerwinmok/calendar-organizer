@@ -288,6 +288,11 @@ public class MainWindow extends BorderPane {
         courseTabView.flushPendingEdits();
     }
 
+    public void shutdown() {
+        flushPendingEdits();
+        courseTabView.shutdownPreviewer();
+    }
+
     public void applyTheme(UiTheme theme) {
         this.activeTheme = theme;
         for (UiTheme candidate : UiTheme.values()) {

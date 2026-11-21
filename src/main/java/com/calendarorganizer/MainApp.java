@@ -18,6 +18,8 @@ import java.net.URL;
 
 public class MainApp extends Application {
 
+    private MainWindow mainWindow;
+
     @Override
     public void start(Stage stage) {
         AppPaths paths = new AppPaths();
@@ -29,6 +31,7 @@ public class MainApp extends Application {
         CourseExporter courseExporter = new CourseExporter(courseManager);
 
         MainWindow root = new MainWindow(calendarService, courseManager, courseExporter);
+        this.mainWindow = root;
         Scene scene = new Scene(root, 1240, 780);
         URL cssUrl = MainApp.class.getResource("/styles.css");
         if (cssUrl != null) {
@@ -38,8 +41,15 @@ public class MainApp extends Application {
         stage.setTitle("Calendar Organizer");
         loadAppIcon(stage);
         stage.setScene(scene);
-        stage.setOnCloseRequest(e -> root.flushPendingEdits());
+        stage.setOnCloseRequest(e -> root.shutdown());
         stage.show();
+    }
+
+    @Override
+    public void stop() {
+        if (mainWindow != null) {
+            mainWindow.shutdown();
+        }
     }
 
     private void loadAppIcon(Stage stage) {
