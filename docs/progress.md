@@ -33,11 +33,11 @@
 
 ## Milestone 10: Windows jpackage Build, Final Docs, and Review (Completed)
 - **What works**:
-  - `scripts/package-windows.ps1` builds a trimmed JDK 21 `jpackage` runtime image wrapped with `packaging/windows/SingleFileLauncher.cs` and custom `app-icon.ico` into a single all-in-one `target/dist/CalendarOrganizer.exe` (~45.3 MB) with bounded `G1GC` heap flags (`-Xms32m -Xmx256m`).
+  - `scripts/package-windows.ps1` builds a trimmed JDK 21 `jpackage` runtime image wrapped with `packaging/windows/SingleFileLauncher.cs` and custom `app-icon.ico` into a single all-in-one `target/dist/CalendarOrganizer.exe` with low-memory `SerialGC` + C1 + `-Dprism.order=sw` flags (`-Xms16m -Xmx128m`) and lazy `HttpClient` initialization.
   - Double-clicking `CalendarOrganizer.exe` anywhere unpacks once into `%LOCALAPPDATA%\CalendarOrganizer` with a dark progress bar and launches straight from cache on subsequent runs, with optional portable data mode (`portable.txt`).
   - LightCraft-inspired single-chrome UI (`MainWindow`, `SettingsDialog` with optional in-app Gemini/Ollama configuration, `UiTheme` with Charcoal/Midnight/Paper themes), static-grid coalesced `WeekGridView`, SQLite WAL + indexes + compaction (`VACUUM` / `PRAGMA optimize`), and one-click reset of calendar history and settings.
-  - `CalendarGridMath` and `EventFormValidator` back interactive calendar zooming, drag-to-create/move/resize, manual event editing, recurring rule editing, and course PDF/PPTX attachment storage.
+  - `CalendarGridMath` and `EventFormValidator` back interactive calendar zooming, drag-to-create/move/resize, manual event editing, recurring rule editing, course sorting (`CourseSortOrder`), and built-in lecture previews (`CourseFilePreviewer` for PDF, `.pptx`, `.docx`, images, and plain text).
   - Both `mvn javafx:run` and the standalone `CalendarOrganizer.exe` launch on Windows cleanly.
-  - All 52 JUnit 5 tests pass.
+  - All 58 JUnit 5 tests pass.
 - **What's next**:
   - Ready for everyday use; set `$env:GEMINI_API_KEY` or run local Ollama optionally for LLM sentence parsing.
