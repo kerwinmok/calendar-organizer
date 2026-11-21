@@ -50,6 +50,8 @@ public class CalendarService {
     });
 
     private static final Executor HTTP_EXECUTOR = createHttpExecutor();
+    private static final Object HTTP_CLIENT_LOCK = new Object();
+    private static volatile HttpClient lazyHttpClient;
 
     private final CalendarRepository repository;
     private final ScheduleParserService parserService;
@@ -90,23 +92,35 @@ public class CalendarService {
         return pool;
     }
 
+    private static HttpClient getOrCreateHttpClient() {
+        HttpClient client = lazyHttpClient;
+        if (client != null) {
+            return client;
+        }
+        synchronized (HTTP_CLIENT_LOCK) {
+            if (lazyHttpClient == null) {
+                lazyHttpClient = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(3))
+                        .executor(HTTP_EXECUTOR)
+                        .build();
+            }
+            return lazyHttpClient;
+        }
+    }
+
     private static ScheduleParserService createSharedParserService(CalendarRepository repository) {
-        HttpClient sharedClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(3))
-                .executor(HTTP_EXECUTOR)
-                .build();
         return new ScheduleParserService(
                 new RuleParser(),
                 new OllamaProvider(
                         () -> resolvePreferenceOrEnv(repository, PREF_OLLAMA_HOST, "OLLAMA_HOST", OllamaProvider.DEFAULT_HOST),
                         () -> resolvePreferenceOrEnv(repository, PREF_OLLAMA_MODEL, "OLLAMA_MODEL", OllamaProvider.DEFAULT_MODEL),
-                        sharedClient
+                        CalendarService::getOrCreateHttpClient
                 ),
                 new GeminiProvider(
                         () -> resolvePreferenceOrEnv(repository, PREF_GEMINI_API_KEY, "GEMINI_API_KEY", ""),
                         () -> resolveEnv("GEMINI_MODEL", GeminiProvider.DEFAULT_MODEL),
                         GeminiProvider.DEFAULT_BASE_URL,
-                        sharedClient
+                        CalendarService::getOrCreateHttpClient
                 )
         );
     }

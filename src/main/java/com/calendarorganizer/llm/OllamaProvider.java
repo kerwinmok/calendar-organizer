@@ -21,32 +21,42 @@ public class OllamaProvider implements LlmProvider {
 
     private final Supplier<String> hostSupplier;
     private final Supplier<String> modelSupplier;
-    private final HttpClient httpClient;
+    private final Supplier<HttpClient> httpClientSupplier;
     private final LlmPromptBuilder promptBuilder;
     private final LlmJsonParser jsonParser;
 
     public OllamaProvider() {
-        this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
+        this(
+                () -> readEnv("OLLAMA_HOST", DEFAULT_HOST),
+                () -> readEnv("OLLAMA_MODEL", DEFAULT_MODEL),
+                () -> HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
+        );
     }
 
     public OllamaProvider(HttpClient httpClient) {
         this(
                 () -> readEnv("OLLAMA_HOST", DEFAULT_HOST),
                 () -> readEnv("OLLAMA_MODEL", DEFAULT_MODEL),
-                httpClient
+                () -> httpClient
         );
     }
 
     public OllamaProvider(String host, String model, HttpClient httpClient) {
-        this(() -> host, () -> model, httpClient);
+        this(() -> host, () -> model, () -> httpClient);
     }
 
     public OllamaProvider(Supplier<String> hostSupplier,
                           Supplier<String> modelSupplier,
                           HttpClient httpClient) {
+        this(hostSupplier, modelSupplier, () -> httpClient);
+    }
+
+    public OllamaProvider(Supplier<String> hostSupplier,
+                          Supplier<String> modelSupplier,
+                          Supplier<HttpClient> httpClientSupplier) {
         this.hostSupplier = hostSupplier;
         this.modelSupplier = modelSupplier;
-        this.httpClient = httpClient;
+        this.httpClientSupplier = httpClientSupplier;
         this.promptBuilder = new LlmPromptBuilder();
         this.jsonParser = new LlmJsonParser();
     }
@@ -64,7 +74,7 @@ public class OllamaProvider implements LlmProvider {
                     .timeout(Duration.ofMillis(1500))
                     .GET()
                     .build();
-            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> response = httpClientSupplier.get().send(request, HttpResponse.BodyHandlers.discarding());
             return response.statusCode() == 200;
         } catch (Exception e) {
             return false;
@@ -87,7 +97,7 @@ public class OllamaProvider implements LlmProvider {
                 .build();
 
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClientSupplier.get().send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 throw new LlmException("Ollama returned HTTP " + response.statusCode());
             }

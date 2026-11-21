@@ -30,7 +30,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
-import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -568,13 +567,18 @@ public class CourseTabView extends BorderPane {
     }
 
     private void openPathInDesktop(Path target) {
-        if (!Desktop.isDesktopSupported()) {
-            publishStatus("Desktop open is not supported on this system.");
+        if (target == null || !Files.exists(target)) {
+            publishStatus("Path does not exist.");
             return;
         }
         CalendarService.backgroundExecutor().execute(() -> {
             try {
-                Desktop.getDesktop().open(target.toFile());
+                String absPath = target.toAbsolutePath().toString();
+                if (Files.isDirectory(target)) {
+                    new ProcessBuilder("explorer.exe", absPath).start();
+                } else {
+                    new ProcessBuilder("rundll32.exe", "url.dll,FileProtocolHandler", absPath).start();
+                }
             } catch (IOException ex) {
                 Platform.runLater(() ->
                         publishStatus("Could not open " + target.getFileName() + ": " + ex.getMessage()));

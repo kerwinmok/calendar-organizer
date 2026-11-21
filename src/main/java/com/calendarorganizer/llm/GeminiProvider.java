@@ -23,12 +23,17 @@ public class GeminiProvider implements LlmProvider {
     private final Supplier<String> apiKeySupplier;
     private final Supplier<String> modelSupplier;
     private final String baseUrl;
-    private final HttpClient httpClient;
+    private final Supplier<HttpClient> httpClientSupplier;
     private final LlmPromptBuilder promptBuilder;
     private final LlmJsonParser jsonParser;
 
     public GeminiProvider() {
-        this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+        this(
+                () -> System.getenv("GEMINI_API_KEY"),
+                () -> readEnv("GEMINI_MODEL", DEFAULT_MODEL),
+                DEFAULT_BASE_URL,
+                () -> HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+        );
     }
 
     public GeminiProvider(HttpClient httpClient) {
@@ -36,22 +41,29 @@ public class GeminiProvider implements LlmProvider {
                 () -> System.getenv("GEMINI_API_KEY"),
                 () -> readEnv("GEMINI_MODEL", DEFAULT_MODEL),
                 DEFAULT_BASE_URL,
-                httpClient
+                () -> httpClient
         );
     }
 
     public GeminiProvider(String apiKey, String model, String baseUrl, HttpClient httpClient) {
-        this(() -> apiKey, () -> model, baseUrl, httpClient);
+        this(() -> apiKey, () -> model, baseUrl, () -> httpClient);
     }
 
     public GeminiProvider(Supplier<String> apiKeySupplier,
                           Supplier<String> modelSupplier,
                           String baseUrl,
                           HttpClient httpClient) {
+        this(apiKeySupplier, modelSupplier, baseUrl, () -> httpClient);
+    }
+
+    public GeminiProvider(Supplier<String> apiKeySupplier,
+                          Supplier<String> modelSupplier,
+                          String baseUrl,
+                          Supplier<HttpClient> httpClientSupplier) {
         this.apiKeySupplier = apiKeySupplier;
         this.modelSupplier = modelSupplier;
         this.baseUrl = trimTrailingSlash(baseUrl);
-        this.httpClient = httpClient;
+        this.httpClientSupplier = httpClientSupplier;
         this.promptBuilder = new LlmPromptBuilder();
         this.jsonParser = new LlmJsonParser();
     }
@@ -85,7 +97,7 @@ public class GeminiProvider implements LlmProvider {
                 .build();
 
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClientSupplier.get().send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 throw new LlmException("Gemini returned HTTP " + response.statusCode());
             }

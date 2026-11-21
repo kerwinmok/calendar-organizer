@@ -20,7 +20,7 @@ public class DatabaseManager {
         ensureParentDir();
         Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath.toAbsolutePath());
         try (Statement stmt = conn.createStatement()) {
-            stmt.execute("PRAGMA cache_size = -2000");
+            stmt.execute("PRAGMA cache_size = -1000");
             stmt.execute("PRAGMA temp_store = MEMORY");
             stmt.execute("PRAGMA busy_timeout = 3000");
         }

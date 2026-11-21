@@ -39,12 +39,15 @@ try {
         --app-version "1.0.0" `
         --icon $iconPath `
         --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,jdk.crypto.ec,jdk.unsupported" `
-        --java-options "-Xms32m" `
-        --java-options "-Xmx256m" `
-        --java-options "-XX:+UseG1GC" `
-        --java-options "-XX:MaxGCPauseMillis=20" `
-        --java-options "-XX:MinHeapFreeRatio=15" `
-        --java-options "-XX:MaxHeapFreeRatio=30" `
+        --java-options "-Xms16m" `
+        --java-options "-Xmx128m" `
+        --java-options "-XX:+UseSerialGC" `
+        --java-options "-XX:TieredStopAtLevel=1" `
+        --java-options "-XX:ReservedCodeCacheSize=20m" `
+        --java-options "-Xss384k" `
+        --java-options "-XX:MinHeapFreeRatio=10" `
+        --java-options "-XX:MaxHeapFreeRatio=20" `
+        --java-options "-Dprism.order=sw" `
         --dest $stageDir
 
     if ($LASTEXITCODE -ne 0) {
