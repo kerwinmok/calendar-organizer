@@ -88,15 +88,18 @@
                     <mainClass>com.calendarorganizer.MainApp</mainClass>
                     <options>
                         <option>-Xms16m</option>
-                        <option>-Xmx192m</option>
+                        <option>-Xmx128m</option>
                         <option>-XX:+UseSerialGC</option>
                         <option>-XX:TieredStopAtLevel=1</option>
-                        <option>-XX:ReservedCodeCacheSize=24m</option>
+                        <option>-XX:ReservedCodeCacheSize=20m</option>
                         <option>-Xss384k</option>
                         <option>-XX:MinHeapFreeRatio=10</option>
                         <option>-XX:MaxHeapFreeRatio=20</option>
+                        <option>-XX:SoftRefLRUPolicyMSPerMB=50</option>
                         <option>-Djava.awt.headless=true</option>
                         <option>-Dprism.order=sw</option>
+                        <option>-Dprism.maxvram=32m</option>
+                        <option>-Dprism.targetvram=16m</option>
                         <option>--enable-native-access=ALL-UNNAMED</option>
                     </options>
                 </configuration>

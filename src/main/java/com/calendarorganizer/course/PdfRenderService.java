@@ -74,11 +74,10 @@ public class PdfRenderService implements AutoCloseable {
         }
     }
 
-    private static final int MAX_OPEN_DOCS = 2;
+    private static final int MAX_OPEN_DOCS = 1;
     private static final int MIN_WIDTH_PX = 240;
     private static final int MAX_WIDTH_PX = 2200;
-    private static final long MAX_RENDER_PIXELS = 4_500_000L;
-    private static final long PDFBOX_MAIN_MEM_BYTES = 4L * 1024L * 1024L;
+    private static final long MAX_RENDER_PIXELS = 3_500_000L;
 
     private final PdfPageCache pageCache;
     private final Object docsLock = new Object();
@@ -348,7 +347,7 @@ public class PdfRenderService implements AutoCloseable {
     private PDDocument loadDocument(Path normalized) throws IOException {
         return Loader.loadPDF(
                 normalized.toFile(),
-                MemoryUsageSetting.setupMixed(PDFBOX_MAIN_MEM_BYTES).streamCache
+                MemoryUsageSetting.setupTempFileOnly().streamCache
         );
     }
 

@@ -10,7 +10,7 @@ import java.util.Objects;
 
 public class PdfPageCache {
 
-    public static final long DEFAULT_MAX_BYTES = 16L * 1024L * 1024L;
+    public static final long DEFAULT_MAX_BYTES = 8L * 1024L * 1024L;
 
     public static final class PageCacheKey {
         private final Path normalizedPath;

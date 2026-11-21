@@ -711,3 +711,11 @@
     -fx-background-color: transparent;
     -fx-padding: 6 8 6 8;
 }
+
+.pdf-page-frame {
+    -fx-background-color: -lc-inset;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
