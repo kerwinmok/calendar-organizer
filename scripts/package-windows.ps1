@@ -1,13 +1,30 @@
 param(
     [switch]$Install,
-    [switch]$DesktopShortcut
+    [switch]$DesktopShortcut,
+    [switch]$Installer,
+    [string]$AppVersion = "1.0.0"
 )
 
 $ErrorActionPreference = "Stop"
 
+$cleanVersion = if ([string]::IsNullOrWhiteSpace($AppVersion)) { "1.0.0" } else { $AppVersion.Trim().TrimStart('v', 'V') }
+if ([string]::IsNullOrWhiteSpace($cleanVersion)) {
+    $cleanVersion = "1.0.0"
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
 try {
+    $distDir = Join-Path $projectRoot "target\dist"
+    if (Test-Path $distDir) {
+        Get-ChildItem -Path $distDir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            if (-not $_.PSIsContainer) {
+                $_.IsReadOnly = $false
+            }
+        }
+        Remove-Item -Recurse -Force $distDir
+    }
+
     & mvn clean package
     if ($LASTEXITCODE -ne 0) {
         throw "mvn clean package failed"
@@ -37,7 +54,7 @@ try {
         --input $inputDir `
         --main-jar "calendar-organizer-1.0.0.jar" `
         --main-class "com.calendarorganizer.Launcher" `
-        --app-version "1.0.0" `
+        --app-version $cleanVersion `
         --icon $iconPath `
         --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.unsupported" `
         --java-options "-Xms16m" `
@@ -61,6 +78,10 @@ try {
     }
 
     $appDir = Join-Path $distDir "CalendarOrganizer"
+    $builtExe = Join-Path $appDir "CalendarOrganizer.exe"
+    if (Test-Path $builtExe) {
+        (Get-Item -Force $builtExe).IsReadOnly = $false
+    }
     $zipPath = Join-Path $distDir "CalendarOrganizer-windows-x64.zip"
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
@@ -73,6 +94,50 @@ try {
     $zipSizeMb = [Math]::Round(((Get-Item $zipPath).Length / 1MB), 1)
     Write-Output "Packaged standalone app-image at: $appDir"
     Write-Output "Packaged portable archive at: $zipPath ($zipSizeMb MB)"
+
+    if ($Installer) {
+        if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            $wixCandidates = @()
+            if (-not [string]::IsNullOrWhiteSpace($env:WIX)) {
+                $wixCandidates += (Join-Path $env:WIX "bin")
+            }
+            $wixCandidates += @(Get-ChildItem -Path "C:\Program Files (x86)\WiX Toolset*\bin" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+            foreach ($dir in $wixCandidates) {
+                if (Test-Path (Join-Path $dir "candle.exe")) {
+                    $env:PATH = "$dir;$env:PATH"
+                    break
+                }
+            }
+        }
+        if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue) -or -not (Get-Command light.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset v3 (candle.exe / light.exe) is required on PATH to build the Windows .exe installer."
+        }
+
+        & jpackage `
+            --type exe `
+            --name "CalendarOrganizer" `
+            --app-version $cleanVersion `
+            --vendor "kerwinmok" `
+            --app-image $appDir `
+            --win-per-user-install `
+            --win-shortcut `
+            --win-menu `
+            --win-menu-group "Calendar Organizer" `
+            --win-dir-chooser `
+            --win-upgrade-uuid "6e4a8c31-9c9a-4f1b-9a8d-7d5f94c0b211" `
+            --dest $distDir
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "jpackage installer build failed"
+        }
+
+        $installerPath = Join-Path $distDir "CalendarOrganizer-$cleanVersion.exe"
+        if (-not (Test-Path $installerPath)) {
+            throw "Expected installer not found at $installerPath"
+        }
+        $installerSizeMb = [Math]::Round(((Get-Item $installerPath).Length / 1MB), 1)
+        Write-Output "Packaged Windows installer at: $installerPath ($installerSizeMb MB)"
+    }
 
     if ($Install) {
         Stop-Process -Name CalendarOrganizer -Force -ErrorAction SilentlyContinue
