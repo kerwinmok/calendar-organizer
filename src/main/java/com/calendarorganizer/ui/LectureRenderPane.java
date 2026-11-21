@@ -8,10 +8,12 @@ import com.calendarorganizer.course.CourseSection;
 import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.course.LectureRenderModel;
 import com.calendarorganizer.service.AppExecutors;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.util.Duration;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -228,9 +230,15 @@ public class LectureRenderPane extends BorderPane {
         entriesListView.setOnKeyReleased(ev -> scheduleVisiblePickerSync());
         entriesListView.setOnMouseReleased(ev -> scheduleVisiblePickerSync());
 
-        entriesListView.widthProperty().addListener((obs, oldW, newW) -> {
+        PauseTransition resizeDebounce = new PauseTransition(Duration.millis(120));
+        resizeDebounce.setOnFinished(e -> {
             if (zoomFit && !entriesListView.getItems().isEmpty()) {
                 entriesListView.refresh();
+            }
+        });
+        entriesListView.widthProperty().addListener((obs, oldW, newW) -> {
+            if (zoomFit && !entriesListView.getItems().isEmpty()) {
+                resizeDebounce.playFromStart();
             }
         });
     }
@@ -386,7 +394,8 @@ public class LectureRenderPane extends BorderPane {
         if (pickerItems.isEmpty()) {
             return;
         }
-        int currentIndex = pickerItems.indexOf(filePickerBox.getValue());
+        CourseItem current = filePickerBox.getValue();
+        int currentIndex = current != null ? pickerItems.indexOf(current) : 0;
         if (currentIndex < 0) {
             currentIndex = 0;
         }
@@ -409,7 +418,8 @@ public class LectureRenderPane extends BorderPane {
 
     private void updatePickerButtons() {
         int count = pickerItems.size();
-        int idx = pickerItems.indexOf(filePickerBox.getValue());
+        CourseItem current = filePickerBox.getValue();
+        int idx = current != null ? pickerItems.indexOf(current) : -1;
         prevFileBtn.setDisable(count <= 1 || idx <= 0);
         nextFileBtn.setDisable(count <= 1 || idx >= count - 1);
         filePickerBox.setDisable(count == 0);
@@ -457,7 +467,7 @@ public class LectureRenderPane extends BorderPane {
     private double computeTargetWidth() {
         double viewportW = Math.max(260.0, entriesListView.getWidth() - 56.0);
         if (zoomFit) {
-            return Math.min(820.0, viewportW);
+            return Math.min(760.0, viewportW);
         }
         return Math.max(260.0, Math.min(1800.0, BASE_ZOOM_WIDTH * zoomFactor));
     }
@@ -539,6 +549,9 @@ public class LectureRenderPane extends BorderPane {
         private final VBox textCard = new VBox(6, textTitleLabel, textBodyLabel);
 
         private long cellTicket;
+        private LectureRenderModel.RenderEntry boundEntry;
+        private int boundRenderWidth;
+        private long boundSeq;
 
         RenderCell() {
             sectionPill.getStyleClass().add("render-section-pill");
@@ -562,13 +575,30 @@ public class LectureRenderPane extends BorderPane {
 
             container.setAlignment(Pos.TOP_CENTER);
             container.getChildren().setAll(headerBanner, pageCard, textCard);
+
+            visibleProperty().addListener((obs, wasVisible, isNowVisible) -> {
+                if (!isNowVisible) {
+                    cellTicket++;
+                    pageImageView.setImage(null);
+                } else if (boundEntry != null && !isEmpty()) {
+                    loadVisibleContentIfNeeded();
+                }
+            });
+            parentProperty().addListener((obs, oldParent, newParent) -> {
+                if (newParent == null) {
+                    cellTicket++;
+                    pageImageView.setImage(null);
+                }
+            });
         }
 
         @Override
         protected void updateItem(LectureRenderModel.RenderEntry entry, boolean empty) {
             super.updateItem(entry, empty);
-            long ticket = ++cellTicket;
+            cellTicket++;
             if (empty || entry == null) {
+                boundEntry = null;
+                boundRenderWidth = 0;
                 pageImageView.setImage(null);
                 setGraphic(null);
                 return;
@@ -577,6 +607,9 @@ public class LectureRenderPane extends BorderPane {
             double targetWidth = computeTargetWidth();
             container.setMaxWidth(targetWidth + 24.0);
             long seqSnapshot = loadSeq.get();
+            boundEntry = entry;
+            boundRenderWidth = (int) Math.round(targetWidth);
+            boundSeq = seqSnapshot;
 
             switch (entry.getEntryKind()) {
                 case FILE_HEADER:
@@ -599,9 +632,11 @@ public class LectureRenderPane extends BorderPane {
                     pageImageView.setFitHeight(pdfHeight);
                     pageTitleLabel.setText(entry.getTitle());
 
-                    int renderWidth = (int) Math.round(targetWidth);
-                    Path pdfPath = entry.getCourseItem().getFilePath();
-                    WritableImage cached = previewer.getCachedPdfPageFxImage(pdfPath, entry.getIndexInFile(), renderWidth);
+                    WritableImage cached = previewer.getCachedPdfPageFxImage(
+                            entry.getCourseItem().getFilePath(),
+                            entry.getIndexInFile(),
+                            boundRenderWidth
+                    );
                     if (cached != null) {
                         pageLoadingHint.setVisible(false);
                         pageImageView.setImage(cached);
@@ -609,27 +644,9 @@ public class LectureRenderPane extends BorderPane {
                         pageImageView.setImage(null);
                         pageLoadingHint.setText("Rendering page " + (entry.getIndexInFile() + 1) + "...");
                         pageLoadingHint.setVisible(true);
-                        AppExecutors.renderExecutor().execute(() -> {
-                            if (loadSeq.get() != seqSnapshot || cellTicket != ticket) {
-                                return;
-                            }
-                            try {
-                                WritableImage img = previewer.renderPdfPageFxImage(pdfPath, entry.getIndexInFile(), renderWidth);
-                                Platform.runLater(() -> {
-                                    if (cellTicket == ticket && loadSeq.get() == seqSnapshot && !isEmpty() && getItem() == entry) {
-                                        pageLoadingHint.setVisible(false);
-                                        pageImageView.setImage(img);
-                                    }
-                                });
-                            } catch (IOException ex) {
-                                Platform.runLater(() -> {
-                                    if (cellTicket == ticket && loadSeq.get() == seqSnapshot && !isEmpty() && getItem() == entry) {
-                                        pageLoadingHint.setText("Could not render page " + (entry.getIndexInFile() + 1));
-                                        pageLoadingHint.setVisible(true);
-                                    }
-                                });
-                            }
-                        });
+                        if (isVisible()) {
+                            loadVisibleContentIfNeeded();
+                        }
                     }
                     break;
                 case IMAGE:
@@ -642,8 +659,7 @@ public class LectureRenderPane extends BorderPane {
                     pageImageView.setFitHeight(0.0);
                     pageTitleLabel.setText(entry.getTitle());
 
-                    Path imgPath = entry.getCourseItem().getFilePath();
-                    Image cachedImg = imageCache.get(imgPath);
+                    Image cachedImg = imageCache.get(entry.getCourseItem().getFilePath());
                     if (cachedImg != null) {
                         pageLoadingHint.setVisible(false);
                         pageImageView.setImage(cachedImg);
@@ -651,28 +667,9 @@ public class LectureRenderPane extends BorderPane {
                         pageImageView.setImage(null);
                         pageLoadingHint.setText("Loading image...");
                         pageLoadingHint.setVisible(true);
-                        AppExecutors.renderExecutor().execute(() -> {
-                            if (loadSeq.get() != seqSnapshot || cellTicket != ticket) {
-                                return;
-                            }
-                            try (InputStream is = Files.newInputStream(imgPath)) {
-                                Image loaded = new Image(is, 1200, 0, true, true);
-                                imageCache.put(imgPath, loaded);
-                                Platform.runLater(() -> {
-                                    if (cellTicket == ticket && loadSeq.get() == seqSnapshot && !isEmpty() && getItem() == entry) {
-                                        pageLoadingHint.setVisible(false);
-                                        pageImageView.setImage(loaded);
-                                    }
-                                });
-                            } catch (IOException ex) {
-                                Platform.runLater(() -> {
-                                    if (cellTicket == ticket && loadSeq.get() == seqSnapshot && !isEmpty() && getItem() == entry) {
-                                        pageLoadingHint.setText("Could not load image.");
-                                        pageLoadingHint.setVisible(true);
-                                    }
-                                });
-                            }
-                        });
+                        if (isVisible()) {
+                            loadVisibleContentIfNeeded();
+                        }
                     }
                     break;
                 case PPTX_SLIDE:
@@ -688,32 +685,14 @@ public class LectureRenderPane extends BorderPane {
                     configureTextCardGeometry(targetWidth);
                     textTitleLabel.setText(entry.getTitle());
 
-                    Path textPath = entry.getCourseItem().getFilePath();
-                    String cachedText = textCache.get(textPath);
+                    String cachedText = textCache.get(entry.getCourseItem().getFilePath());
                     if (cachedText != null) {
                         textBodyLabel.setText(cachedText);
                     } else {
                         textBodyLabel.setText("Loading text...");
-                        AppExecutors.ioExecutor().execute(() -> {
-                            if (loadSeq.get() != seqSnapshot || cellTicket != ticket) {
-                                return;
-                            }
-                            try {
-                                String content = previewer.extractTextPreview(textPath);
-                                textCache.put(textPath, content);
-                                Platform.runLater(() -> {
-                                    if (cellTicket == ticket && loadSeq.get() == seqSnapshot && !isEmpty() && getItem() == entry) {
-                                        textBodyLabel.setText(content);
-                                    }
-                                });
-                            } catch (IOException ex) {
-                                Platform.runLater(() -> {
-                                    if (cellTicket == ticket && loadSeq.get() == seqSnapshot && !isEmpty() && getItem() == entry) {
-                                        textBodyLabel.setText("Could not read file: " + ex.getMessage());
-                                    }
-                                });
-                            }
-                        });
+                        if (isVisible()) {
+                            loadVisibleContentIfNeeded();
+                        }
                     }
                     break;
                 case UNSUPPORTED:
@@ -727,6 +706,138 @@ public class LectureRenderPane extends BorderPane {
             }
 
             setGraphic(container);
+        }
+
+        private void loadVisibleContentIfNeeded() {
+            LectureRenderModel.RenderEntry entry = boundEntry;
+            int renderWidth = boundRenderWidth;
+            long seqSnapshot = boundSeq;
+            if (entry == null || loadSeq.get() != seqSnapshot) {
+                return;
+            }
+            switch (entry.getEntryKind()) {
+                case PDF_PAGE:
+                    if (pageImageView.getImage() != null || renderWidth <= 0) {
+                        return;
+                    }
+                    Path pdfPath = entry.getCourseItem().getFilePath();
+                    WritableImage cached = previewer.getCachedPdfPageFxImage(pdfPath, entry.getIndexInFile(), renderWidth);
+                    if (cached != null) {
+                        pageLoadingHint.setVisible(false);
+                        pageImageView.setImage(cached);
+                        return;
+                    }
+                    long pdfTicket = ++cellTicket;
+                    AppExecutors.renderExecutor().execute(() -> {
+                        if (loadSeq.get() != seqSnapshot || cellTicket != pdfTicket || !isVisible()) {
+                            return;
+                        }
+                        try {
+                            WritableImage img = previewer.renderPdfPageFxImage(pdfPath, entry.getIndexInFile(), renderWidth);
+                            Platform.runLater(() -> {
+                                if (cellTicket == pdfTicket
+                                        && loadSeq.get() == seqSnapshot
+                                        && !isEmpty()
+                                        && isVisible()
+                                        && getItem() == entry) {
+                                    pageLoadingHint.setVisible(false);
+                                    pageImageView.setImage(img);
+                                }
+                            });
+                        } catch (Throwable ex) {
+                            Platform.runLater(() -> {
+                                if (cellTicket == pdfTicket
+                                        && loadSeq.get() == seqSnapshot
+                                        && !isEmpty()
+                                        && getItem() == entry) {
+                                    pageLoadingHint.setText("Could not render page " + (entry.getIndexInFile() + 1));
+                                    pageLoadingHint.setVisible(true);
+                                }
+                            });
+                        }
+                    });
+                    break;
+                case IMAGE:
+                    if (pageImageView.getImage() != null) {
+                        return;
+                    }
+                    Path imgPath = entry.getCourseItem().getFilePath();
+                    Image cachedImg = imageCache.get(imgPath);
+                    if (cachedImg != null) {
+                        pageLoadingHint.setVisible(false);
+                        pageImageView.setImage(cachedImg);
+                        return;
+                    }
+                    long imgTicket = ++cellTicket;
+                    AppExecutors.renderExecutor().execute(() -> {
+                        if (loadSeq.get() != seqSnapshot || cellTicket != imgTicket || !isVisible()) {
+                            return;
+                        }
+                        try (InputStream is = Files.newInputStream(imgPath)) {
+                            Image loaded = new Image(is, 1000, 0, true, true);
+                            imageCache.put(imgPath, loaded);
+                            Platform.runLater(() -> {
+                                if (cellTicket == imgTicket
+                                        && loadSeq.get() == seqSnapshot
+                                        && !isEmpty()
+                                        && isVisible()
+                                        && getItem() == entry) {
+                                    pageLoadingHint.setVisible(false);
+                                    pageImageView.setImage(loaded);
+                                }
+                            });
+                        } catch (IOException ex) {
+                            Platform.runLater(() -> {
+                                if (cellTicket == imgTicket
+                                        && loadSeq.get() == seqSnapshot
+                                        && !isEmpty()
+                                        && getItem() == entry) {
+                                    pageLoadingHint.setText("Could not load image.");
+                                    pageLoadingHint.setVisible(true);
+                                }
+                            });
+                        }
+                    });
+                    break;
+                case TEXT_DOC:
+                    Path textPath = entry.getCourseItem().getFilePath();
+                    String cachedText = textCache.get(textPath);
+                    if (cachedText != null) {
+                        textBodyLabel.setText(cachedText);
+                        return;
+                    }
+                    long textTicket = ++cellTicket;
+                    AppExecutors.ioExecutor().execute(() -> {
+                        if (loadSeq.get() != seqSnapshot || cellTicket != textTicket || !isVisible()) {
+                            return;
+                        }
+                        try {
+                            String content = previewer.extractTextPreview(textPath);
+                            textCache.put(textPath, content);
+                            Platform.runLater(() -> {
+                                if (cellTicket == textTicket
+                                        && loadSeq.get() == seqSnapshot
+                                        && !isEmpty()
+                                        && isVisible()
+                                        && getItem() == entry) {
+                                    textBodyLabel.setText(content);
+                                }
+                            });
+                        } catch (IOException ex) {
+                            Platform.runLater(() -> {
+                                if (cellTicket == textTicket
+                                        && loadSeq.get() == seqSnapshot
+                                        && !isEmpty()
+                                        && getItem() == entry) {
+                                    textBodyLabel.setText("Could not read file: " + ex.getMessage());
+                                }
+                            });
+                        }
+                    });
+                    break;
+                default:
+                    break;
+            }
         }
 
         private void configureTextCardGeometry(double targetWidth) {

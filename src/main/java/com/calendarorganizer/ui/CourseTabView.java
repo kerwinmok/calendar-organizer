@@ -10,10 +10,12 @@ import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.course.PdfRenderService;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.util.Duration;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -96,6 +98,7 @@ public class CourseTabView extends BorderPane {
     private final Button importFileButton = new Button("Import File");
     private final Button deleteItemButton = new Button("Delete");
     private final Button deleteCourseButton = new Button("Delete Course");
+    private final Button renderCourseButton = new Button("Render");
 
     private List<Course> allCourses = List.of();
     private String filterText = "";
@@ -117,6 +120,7 @@ public class CourseTabView extends BorderPane {
     private Consumer<String> onStatusChanged;
     private Runnable onStateChanged;
     private Consumer<CourseSortOrder> onSortOrderChanged;
+    private Runnable onRenderRequested;
 
     public CourseTabView(CourseManager courseManager, CourseExporter courseExporter) {
         this.courseManager = courseManager;
@@ -147,6 +151,7 @@ public class CourseTabView extends BorderPane {
                 newItemButton.setDisable(false);
                 importFileButton.setDisable(false);
                 openFolderButton.setDisable(false);
+                renderCourseButton.setDisable(false);
                 refreshItems();
             } else {
                 selectedCourse = null;
@@ -155,6 +160,7 @@ public class CourseTabView extends BorderPane {
                 newItemButton.setDisable(true);
                 importFileButton.setDisable(true);
                 openFolderButton.setDisable(true);
+                renderCourseButton.setDisable(true);
                 itemListView.getItems().clear();
                 clearEditor();
             }
@@ -179,6 +185,17 @@ public class CourseTabView extends BorderPane {
 
     private VBox buildSectionFilesPane() {
         courseHeading.getStyleClass().add("section-heading");
+        renderCourseButton.getStyleClass().add("lc-btn-primary");
+        renderCourseButton.setDisable(true);
+        renderCourseButton.setOnAction(e -> {
+            if (onRenderRequested != null) {
+                onRenderRequested.run();
+            }
+        });
+        Region headingSpacer = new Region();
+        HBox.setHgrow(headingSpacer, Priority.ALWAYS);
+        HBox headingRow = new HBox(8, courseHeading, headingSpacer, renderCourseButton);
+        headingRow.setAlignment(Pos.CENTER_LEFT);
 
         HBox segmentGroup = new HBox(2);
         segmentGroup.getStyleClass().add("lc-segment-group");
@@ -237,7 +254,7 @@ public class CourseTabView extends BorderPane {
         deleteItemButton.setOnAction(e -> handleDeleteItem());
 
         HBox buttons = new HBox(6, newItemButton, importFileButton, deleteItemButton);
-        VBox pane = new VBox(8, courseHeading, segmentGroup, sortRow, itemListView, dropHint, buttons);
+        VBox pane = new VBox(8, headingRow, segmentGroup, sortRow, itemListView, dropHint, buttons);
         pane.getStyleClass().add("lc-inset-pane");
         pane.setPadding(new Insets(10));
         pane.setMinWidth(235);
@@ -357,6 +374,8 @@ public class CourseTabView extends BorderPane {
             private final StackPane imageFrame = new StackPane(loadingHint, pageImage);
             private final VBox cellBox = new VBox(4, pageLabel, imageFrame);
             private long cellTicket;
+            private PdfPageSlot boundSlot;
+            private int boundRenderWidth;
 
             {
                 pageLabel.getStyleClass().add("dim-label");
@@ -366,13 +385,30 @@ public class CourseTabView extends BorderPane {
                 imageFrame.getStyleClass().add("pdf-page-frame");
                 imageFrame.setAlignment(Pos.CENTER);
                 cellBox.setAlignment(Pos.TOP_CENTER);
+
+                visibleProperty().addListener((obs, wasVisible, isNowVisible) -> {
+                    if (!isNowVisible) {
+                        cellTicket++;
+                        pageImage.setImage(null);
+                    } else if (boundSlot != null && !isEmpty()) {
+                        startVisibleRenderIfNeeded();
+                    }
+                });
+                parentProperty().addListener((obs, oldParent, newParent) -> {
+                    if (newParent == null) {
+                        cellTicket++;
+                        pageImage.setImage(null);
+                    }
+                });
             }
 
             @Override
             protected void updateItem(PdfPageSlot slot, boolean empty) {
                 super.updateItem(slot, empty);
-                long ticket = ++cellTicket;
+                cellTicket++;
                 if (empty || slot == null) {
+                    boundSlot = null;
+                    boundRenderWidth = 0;
                     pageImage.setImage(null);
                     setGraphic(null);
                     return;
@@ -387,22 +423,39 @@ public class CourseTabView extends BorderPane {
                 pageImage.setFitHeight(targetHeight);
                 pageLabel.setText("Page " + (slot.pageIndex + 1) + " / " + slot.totalPages);
 
-                int renderWidth = (int) Math.round(targetWidth);
+                boundSlot = slot;
+                boundRenderWidth = (int) Math.round(targetWidth);
+                setGraphic(cellBox);
+
+                WritableImage cached = previewer.getCachedPdfPageFxImage(slot.pdfPath, slot.pageIndex, boundRenderWidth);
+                if (cached != null) {
+                    loadingHint.setVisible(false);
+                    pageImage.setImage(cached);
+                } else {
+                    pageImage.setImage(null);
+                    loadingHint.setText("Loading page " + (slot.pageIndex + 1) + "...");
+                    loadingHint.setVisible(true);
+                    if (isVisible()) {
+                        startVisibleRenderIfNeeded();
+                    }
+                }
+            }
+
+            private void startVisibleRenderIfNeeded() {
+                PdfPageSlot slot = boundSlot;
+                int renderWidth = boundRenderWidth;
+                if (slot == null || renderWidth <= 0 || pageImage.getImage() != null) {
+                    return;
+                }
                 WritableImage cached = previewer.getCachedPdfPageFxImage(slot.pdfPath, slot.pageIndex, renderWidth);
                 if (cached != null) {
                     loadingHint.setVisible(false);
                     pageImage.setImage(cached);
-                    setGraphic(cellBox);
                     return;
                 }
-
-                pageImage.setImage(null);
-                loadingHint.setText("Loading page " + (slot.pageIndex + 1) + "...");
-                loadingHint.setVisible(true);
-                setGraphic(cellBox);
-
+                long ticket = ++cellTicket;
                 AppExecutors.renderExecutor().execute(() -> {
-                    if (previewRequestSeq.get() != slot.requestId || cellTicket != ticket) {
+                    if (previewRequestSeq.get() != slot.requestId || cellTicket != ticket || !isVisible()) {
                         return;
                     }
                     try {
@@ -411,12 +464,13 @@ public class CourseTabView extends BorderPane {
                             if (cellTicket == ticket
                                     && previewRequestSeq.get() == slot.requestId
                                     && !isEmpty()
+                                    && isVisible()
                                     && getItem() == slot) {
                                 loadingHint.setVisible(false);
                                 pageImage.setImage(rendered);
                             }
                         });
-                    } catch (IOException ex) {
+                    } catch (Throwable ex) {
                         Platform.runLater(() -> {
                             if (cellTicket == ticket
                                     && previewRequestSeq.get() == slot.requestId
@@ -436,9 +490,15 @@ public class CourseTabView extends BorderPane {
                 ev.consume();
             }
         });
-        pdfPagesListView.widthProperty().addListener((obs, oldW, newW) -> {
+        PauseTransition resizeDebounce = new PauseTransition(Duration.millis(120));
+        resizeDebounce.setOnFinished(e -> {
             if (pdfZoomFit && pdfPagesListView.isVisible() && !pdfPagesListView.getItems().isEmpty()) {
                 pdfPagesListView.refresh();
+            }
+        });
+        pdfPagesListView.widthProperty().addListener((obs, oldW, newW) -> {
+            if (pdfZoomFit && pdfPagesListView.isVisible() && !pdfPagesListView.getItems().isEmpty()) {
+                resizeDebounce.playFromStart();
             }
         });
         pdfPagesListView.setVisible(false);
@@ -492,6 +552,10 @@ public class CourseTabView extends BorderPane {
 
     public void setOnSortOrderChanged(Consumer<CourseSortOrder> listener) {
         this.onSortOrderChanged = listener;
+    }
+
+    public void setOnRenderRequested(Runnable listener) {
+        this.onRenderRequested = listener;
     }
 
     public void setSortOrder(CourseSortOrder order) {
@@ -1239,6 +1303,10 @@ public class CourseTabView extends BorderPane {
     }
 
     private void releasePreviewResources() {
+        releasePreviewResources(true);
+    }
+
+    private void releasePreviewResources(boolean clearSharedPdfCache) {
         pdfPagesListView.getItems().clear();
         previewImageView.setImage(null);
         pptxThumbView.setImage(null);
@@ -1247,13 +1315,19 @@ public class CourseTabView extends BorderPane {
         activePptxSlides = List.of();
         activePageIndex = 0;
         activeTotalPages = 0;
-        previewer.clearPdfMemory();
+        if (clearSharedPdfCache) {
+            previewer.clearPdfMemory();
+        }
         hidePreviewNavBar();
     }
 
     public void releaseTransientCaches() {
+        releaseTransientCaches(true);
+    }
+
+    public void releaseTransientCaches(boolean clearSharedPdfCache) {
         previewRequestSeq.incrementAndGet();
-        releasePreviewResources();
+        releasePreviewResources(clearSharedPdfCache);
         if (selectedItem != null && !selectedItem.isMarkdown()) {
             previewTextArea.clear();
         }

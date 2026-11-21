@@ -1,5 +1,6 @@
 package com.calendarorganizer.ui;
 
+import com.calendarorganizer.course.Course;
 import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSortOrder;
@@ -14,11 +15,16 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
+import javafx.stage.Stage;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -29,7 +35,13 @@ public class MainWindow extends BorderPane {
     private final CourseExporter courseExporter;
     private final CalendarTabView calendarTabView;
     private CourseTabView courseTabView;
+    private LectureRenderPane lectureRenderPane;
     private final AtomicLong statsRequestSeq = new AtomicLong(0L);
+
+    private final StackPane mainContentHost = new StackPane();
+    private final SplitPane workspaceSplit = new SplitPane();
+    private final HBox topBar;
+    private final HBox bottomBar;
 
     private final Button calendarNavBtn = new Button("Calendar");
     private final Button coursesNavBtn = new Button("Courses");
@@ -46,6 +58,7 @@ public class MainWindow extends BorderPane {
     private final MenuButton icsMenuBtn = new MenuButton("ICS");
     private final HBox calendarActionsBox;
 
+    private final Button renderCourseBtn = new Button("Render");
     private final Button exportCourseBtn = new Button("Export Course");
     private final Button exportAllBtn = new Button("Export All");
     private final HBox courseActionsBox;
@@ -59,6 +72,9 @@ public class MainWindow extends BorderPane {
 
     private UiTheme activeTheme;
     private boolean showingCalendar = true;
+    private double savedSplitDivider = 0.50;
+    private boolean renderFullScreen;
+    private boolean fullScreenListenerAttached;
 
     public MainWindow(CalendarService calendarService,
                       CourseManager courseManager,
@@ -78,8 +94,20 @@ public class MainWindow extends BorderPane {
         this.calendarTabView.setOnStatusChanged(this::updateStatus);
         this.calendarTabView.setOnDataChanged(this::refreshFooter);
 
-        setTop(buildTopBar());
-        setBottom(buildBottomBar());
+        this.topBar = buildTopBar();
+        this.bottomBar = buildBottomBar();
+        this.workspaceSplit.getItems().setAll(mainContentHost);
+
+        setTop(topBar);
+        setCenter(workspaceSplit);
+        setBottom(bottomBar);
+
+        addEventFilter(KeyEvent.KEY_PRESSED, ev -> {
+            if (ev.getCode() == KeyCode.F11 && isRenderPaneOpen()) {
+                setRenderFullScreen(!renderFullScreen);
+                ev.consume();
+            }
+        });
 
         applyTheme(activeTheme);
         switchToCalendar();
@@ -91,6 +119,7 @@ public class MainWindow extends BorderPane {
             view.setActiveTheme(activeTheme);
             view.setOnStatusChanged(this::updateStatus);
             view.setOnStateChanged(this::refreshCourseFooterUi);
+            view.setOnRenderRequested(this::openRenderPane);
             view.setOnSortOrderChanged(order ->
                     AppExecutors.ioExecutor().execute(() -> calendarService.saveCourseSortOrder(order.getId())));
             String filter = courseSearchField.getText();
@@ -204,6 +233,10 @@ public class MainWindow extends BorderPane {
     }
 
     private HBox buildCourseActionsBox() {
+        renderCourseBtn.getStyleClass().add("lc-btn-primary");
+        renderCourseBtn.setDisable(true);
+        renderCourseBtn.setOnAction(e -> openRenderPane());
+
         exportCourseBtn.setOnAction(e -> {
             if (courseTabView != null) {
                 courseTabView.exportSelectedCourse();
@@ -215,7 +248,7 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        HBox box = new HBox(6, exportCourseBtn, exportAllBtn);
+        HBox box = new HBox(6, renderCourseBtn, exportCourseBtn, exportAllBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
         return box;
     }
@@ -259,9 +292,9 @@ public class MainWindow extends BorderPane {
     private void switchToCalendar() {
         showingCalendar = true;
         if (courseTabView != null) {
-            courseTabView.releaseTransientCaches();
+            courseTabView.releaseTransientCaches(!isRenderPaneOpen());
         }
-        setCenter(calendarTabView);
+        mainContentHost.getChildren().setAll(calendarTabView);
         updateModeVisibility();
         statusLabel.setText(calendarTabView.getLastStatus());
         refreshFooter();
@@ -270,11 +303,111 @@ public class MainWindow extends BorderPane {
     private void switchToCourses() {
         showingCalendar = false;
         CourseTabView view = ensureCourseTabView();
-        setCenter(view);
+        mainContentHost.getChildren().setAll(view);
         view.ensureActivePreviewLoaded();
         updateModeVisibility();
         statusLabel.setText(view.getLastStatus());
         refreshCourseFooterUi();
+    }
+
+    private boolean isRenderPaneOpen() {
+        return lectureRenderPane != null
+                && (workspaceSplit.getItems().contains(lectureRenderPane) || renderFullScreen);
+    }
+
+    private void openRenderPane() {
+        CourseTabView view = ensureCourseTabView();
+        Course selectedCourse = view.getSelectedCourse();
+        if (selectedCourse == null) {
+            updateStatus("Select a course first to render its files.");
+            return;
+        }
+        view.flushPendingEdits();
+
+        if (lectureRenderPane == null) {
+            lectureRenderPane = new LectureRenderPane(courseManager, view.getPreviewer());
+            lectureRenderPane.setOnFullScreenToggle(this::setRenderFullScreen);
+            lectureRenderPane.setOnCloseRequested(this::closeRenderPane);
+            lectureRenderPane.setOnStatusChanged(this::updateStatus);
+        }
+
+        if (!renderFullScreen && !workspaceSplit.getItems().contains(lectureRenderPane)) {
+            workspaceSplit.getItems().setAll(mainContentHost, lectureRenderPane);
+            workspaceSplit.setDividerPositions(savedSplitDivider);
+        }
+
+        lectureRenderPane.loadCourseContext(
+                selectedCourse,
+                view.getSelectedSection(),
+                view.getSelectedItem(),
+                view.getActiveSortOrder()
+        );
+    }
+
+    private void closeRenderPane() {
+        if (renderFullScreen) {
+            setRenderFullScreen(false);
+        }
+        if (workspaceSplit.getDividers().size() == 1) {
+            savedSplitDivider = workspaceSplit.getDividers().get(0).getPosition();
+        }
+        workspaceSplit.getItems().setAll(mainContentHost);
+        if (lectureRenderPane != null) {
+            lectureRenderPane.releaseResources();
+        }
+    }
+
+    private void setRenderFullScreen(boolean enable) {
+        Stage stage = getScene() != null && getScene().getWindow() instanceof Stage
+                ? (Stage) getScene().getWindow()
+                : null;
+        if (stage != null && !fullScreenListenerAttached) {
+            fullScreenListenerAttached = true;
+            stage.fullScreenProperty().addListener((obs, wasFull, isFull) -> {
+                if (!isFull && renderFullScreen) {
+                    restoreSideBySideFromFullScreen();
+                }
+            });
+        }
+
+        if (enable) {
+            if (lectureRenderPane == null || renderFullScreen) {
+                return;
+            }
+            if (workspaceSplit.getItems().contains(lectureRenderPane) && workspaceSplit.getDividers().size() == 1) {
+                savedSplitDivider = workspaceSplit.getDividers().get(0).getPosition();
+            }
+            renderFullScreen = true;
+            lectureRenderPane.setFullScreenState(true);
+            setTop(null);
+            setBottom(null);
+            workspaceSplit.getItems().setAll(lectureRenderPane);
+            if (stage != null) {
+                stage.setFullScreenExitHint("");
+                stage.setFullScreen(true);
+            }
+        } else {
+            if (stage != null && stage.isFullScreen()) {
+                stage.setFullScreen(false);
+            }
+            restoreSideBySideFromFullScreen();
+        }
+    }
+
+    private void restoreSideBySideFromFullScreen() {
+        if (!renderFullScreen) {
+            return;
+        }
+        renderFullScreen = false;
+        setTop(topBar);
+        setBottom(bottomBar);
+        if (lectureRenderPane != null) {
+            lectureRenderPane.setFullScreenState(false);
+            workspaceSplit.getItems().setAll(mainContentHost, lectureRenderPane);
+            workspaceSplit.setDividerPositions(savedSplitDivider);
+        } else {
+            workspaceSplit.getItems().setAll(mainContentHost);
+        }
     }
 
     private void updateModeVisibility() {
@@ -338,6 +471,9 @@ public class MainWindow extends BorderPane {
 
     public void shutdown() {
         flushPendingEdits();
+        if (lectureRenderPane != null) {
+            lectureRenderPane.releaseResources();
+        }
         if (courseTabView != null) {
             courseTabView.shutdownPreviewer();
         }
@@ -369,10 +505,13 @@ public class MainWindow extends BorderPane {
         weekLabel.setText(calendarTabView.getWeekRangeLabel());
         if (courseTabView != null) {
             coursePathBottomLabel.setText(courseTabView.getActiveLocationSummary());
-            exportCourseBtn.setDisable(!courseTabView.hasSelectedCourse());
+            boolean hasSelected = courseTabView.hasSelectedCourse();
+            renderCourseBtn.setDisable(!hasSelected);
+            exportCourseBtn.setDisable(!hasSelected);
             exportAllBtn.setDisable(!courseTabView.hasCourses());
         } else {
             coursePathBottomLabel.setText("No course file selected");
+            renderCourseBtn.setDisable(true);
             exportCourseBtn.setDisable(true);
             exportAllBtn.setDisable(true);
         }
