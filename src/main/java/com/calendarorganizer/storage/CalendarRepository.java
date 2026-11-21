@@ -457,7 +457,7 @@ public class CalendarRepository {
     }
 
     public String loadTheme() {
-        return loadPreference(PREF_THEME, "charcoal");
+        return loadPreference(PREF_THEME, "system");
     }
 
     public void saveTheme(String themeId) {

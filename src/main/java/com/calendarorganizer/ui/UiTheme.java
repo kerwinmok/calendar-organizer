@@ -5,18 +5,21 @@ import javafx.scene.control.DialogPane;
 import java.net.URL;
 
 public enum UiTheme {
-    CHARCOAL("charcoal", "Charcoal (Dark)", "theme-charcoal"),
-    MIDNIGHT("midnight", "Midnight (OLED Dark)", "theme-midnight"),
-    PAPER("paper", "Paper (Light)", "theme-paper");
+    SYSTEM("system", "System (Auto)", "theme-charcoal", true),
+    CHARCOAL("charcoal", "Charcoal (Dark)", "theme-charcoal", true),
+    MIDNIGHT("midnight", "Midnight (OLED Dark)", "theme-midnight", true),
+    PAPER("paper", "Paper (Light)", "theme-paper", false);
 
     private final String id;
     private final String label;
     private final String styleClass;
+    private final boolean dark;
 
-    UiTheme(String id, String label, String styleClass) {
+    UiTheme(String id, String label, String styleClass, boolean dark) {
         this.id = id;
         this.label = label;
         this.styleClass = styleClass;
+        this.dark = dark;
     }
 
     public String getId() {
@@ -31,7 +34,31 @@ public enum UiTheme {
         return styleClass;
     }
 
+    public String getStyleClass(boolean systemDark) {
+        return resolve(systemDark).styleClass;
+    }
+
+    public boolean isSystem() {
+        return this == SYSTEM;
+    }
+
+    public boolean isDark() {
+        return dark;
+    }
+
+    public UiTheme resolve(boolean systemDark) {
+        return this == SYSTEM ? (systemDark ? CHARCOAL : PAPER) : this;
+    }
+
+    public boolean isEffectiveDark(boolean systemDark) {
+        return resolve(systemDark).isDark();
+    }
+
     public void applyToDialog(DialogPane pane) {
+        applyToDialog(pane, true);
+    }
+
+    public void applyToDialog(DialogPane pane, boolean systemDark) {
         URL cssUrl = UiTheme.class.getResource("/styles.css");
         if (cssUrl != null) {
             String urlStr = cssUrl.toExternalForm();
@@ -42,7 +69,7 @@ public enum UiTheme {
         for (UiTheme candidate : values()) {
             pane.getStyleClass().remove(candidate.getStyleClass());
         }
-        pane.getStyleClass().add(styleClass);
+        pane.getStyleClass().add(resolve(systemDark).getStyleClass());
     }
 
     public static UiTheme fromId(String rawId) {
@@ -53,7 +80,7 @@ public enum UiTheme {
                 }
             }
         }
-        return CHARCOAL;
+        return SYSTEM;
     }
 
     @Override
