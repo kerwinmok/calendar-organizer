@@ -7,6 +7,7 @@ import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.StorageStats;
+import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
@@ -19,11 +20,16 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 public class MainWindow extends BorderPane {
 
     private final CalendarService calendarService;
+    private final CourseManager courseManager;
+    private final CourseExporter courseExporter;
     private final CalendarTabView calendarTabView;
-    private final CourseTabView courseTabView;
+    private CourseTabView courseTabView;
+    private final AtomicLong statsRequestSeq = new AtomicLong(0L);
 
     private final Button calendarNavBtn = new Button("Calendar");
     private final Button coursesNavBtn = new Button("Courses");
@@ -58,10 +64,9 @@ public class MainWindow extends BorderPane {
                       CourseManager courseManager,
                       CourseExporter courseExporter) {
         this.calendarService = calendarService;
+        this.courseManager = courseManager;
+        this.courseExporter = courseExporter;
         this.calendarTabView = new CalendarTabView(calendarService);
-        this.courseTabView = new CourseTabView(courseManager, courseExporter);
-        this.courseTabView.setSortOrder(CourseSortOrder.fromId(calendarService.loadCourseSortOrder()));
-        this.courseTabView.setOnSortOrderChanged(order -> calendarService.saveCourseSortOrder(order.getId()));
         this.activeTheme = UiTheme.fromId(calendarService.loadTheme());
 
         this.calendarCommandBox = buildCalendarCommandBox();
@@ -72,8 +77,6 @@ public class MainWindow extends BorderPane {
 
         this.calendarTabView.setOnStatusChanged(this::updateStatus);
         this.calendarTabView.setOnDataChanged(this::refreshFooter);
-        this.courseTabView.setOnStatusChanged(this::updateStatus);
-        this.courseTabView.setOnStateChanged(this::refreshFooter);
 
         setTop(buildTopBar());
         setBottom(buildBottomBar());
@@ -82,12 +85,37 @@ public class MainWindow extends BorderPane {
         switchToCalendar();
     }
 
+    private CourseTabView ensureCourseTabView() {
+        if (courseTabView == null) {
+            CourseTabView view = new CourseTabView(courseManager, courseExporter);
+            view.setActiveTheme(activeTheme);
+            view.setOnStatusChanged(this::updateStatus);
+            view.setOnStateChanged(this::refreshCourseFooterUi);
+            view.setOnSortOrderChanged(order ->
+                    AppExecutors.ioExecutor().execute(() -> calendarService.saveCourseSortOrder(order.getId())));
+            String filter = courseSearchField.getText();
+            if (filter != null && !filter.isBlank()) {
+                view.setFilterText(filter);
+            }
+            this.courseTabView = view;
+            AppExecutors.ioExecutor().execute(() -> {
+                CourseSortOrder savedOrder = CourseSortOrder.fromId(calendarService.loadCourseSortOrder());
+                Platform.runLater(() -> {
+                    if (courseTabView == view) {
+                        view.setSortOrder(savedOrder);
+                    }
+                });
+            });
+        }
+        return courseTabView;
+    }
+
     private HBox buildTopBar() {
         Button sidebarToggleBtn = new Button("Panel");
         sidebarToggleBtn.setOnAction(e -> {
             if (showingCalendar) {
                 calendarTabView.toggleInspector();
-            } else {
+            } else if (courseTabView != null) {
                 courseTabView.toggleRail();
             }
         });
@@ -145,7 +173,11 @@ public class MainWindow extends BorderPane {
         courseSearchField.getStyleClass().add("lc-command-field");
         courseSearchField.setPrefWidth(340);
         courseSearchField.setMaxWidth(440);
-        courseSearchField.textProperty().addListener((obs, oldVal, newVal) -> courseTabView.setFilterText(newVal));
+        courseSearchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (courseTabView != null) {
+                courseTabView.setFilterText(newVal);
+            }
+        });
 
         HBox box = new HBox(courseSearchField);
         box.setAlignment(Pos.CENTER);
@@ -172,8 +204,16 @@ public class MainWindow extends BorderPane {
     }
 
     private HBox buildCourseActionsBox() {
-        exportCourseBtn.setOnAction(e -> courseTabView.exportSelectedCourse());
-        exportAllBtn.setOnAction(e -> courseTabView.exportAllCourses());
+        exportCourseBtn.setOnAction(e -> {
+            if (courseTabView != null) {
+                courseTabView.exportSelectedCourse();
+            }
+        });
+        exportAllBtn.setOnAction(e -> {
+            if (courseTabView != null) {
+                courseTabView.exportAllCourses();
+            }
+        });
 
         HBox box = new HBox(6, exportCourseBtn, exportAllBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
@@ -218,6 +258,9 @@ public class MainWindow extends BorderPane {
 
     private void switchToCalendar() {
         showingCalendar = true;
+        if (courseTabView != null) {
+            courseTabView.releaseTransientCaches();
+        }
         setCenter(calendarTabView);
         updateModeVisibility();
         statusLabel.setText(calendarTabView.getLastStatus());
@@ -226,10 +269,12 @@ public class MainWindow extends BorderPane {
 
     private void switchToCourses() {
         showingCalendar = false;
-        setCenter(courseTabView);
+        CourseTabView view = ensureCourseTabView();
+        setCenter(view);
+        view.ensureActivePreviewLoaded();
         updateModeVisibility();
-        statusLabel.setText(courseTabView.getLastStatus());
-        refreshFooter();
+        statusLabel.setText(view.getLastStatus());
+        refreshCourseFooterUi();
     }
 
     private void updateModeVisibility() {
@@ -286,12 +331,16 @@ public class MainWindow extends BorderPane {
     }
 
     public void flushPendingEdits() {
-        courseTabView.flushPendingEdits();
+        if (courseTabView != null) {
+            courseTabView.flushPendingEdits();
+        }
     }
 
     public void shutdown() {
         flushPendingEdits();
-        courseTabView.shutdownPreviewer();
+        if (courseTabView != null) {
+            courseTabView.shutdownPreviewer();
+        }
         AppExecutors.shutdown();
     }
 
@@ -302,7 +351,9 @@ public class MainWindow extends BorderPane {
         }
         getStyleClass().add(theme.getStyleClass());
         calendarTabView.setActiveTheme(theme);
-        courseTabView.setActiveTheme(theme);
+        if (courseTabView != null) {
+            courseTabView.setActiveTheme(theme);
+        }
     }
 
     private void updateStatus(String status) {
@@ -310,12 +361,32 @@ public class MainWindow extends BorderPane {
     }
 
     private void refreshFooter() {
-        weekLabel.setText(calendarTabView.getWeekRangeLabel());
-        coursePathBottomLabel.setText(courseTabView.getActiveLocationSummary());
-        exportCourseBtn.setDisable(!courseTabView.hasSelectedCourse());
-        exportAllBtn.setDisable(!courseTabView.hasCourses());
+        refreshCourseFooterUi();
+        refreshStatsAsync();
+    }
 
-        StorageStats stats = calendarService.getStorageStats();
-        statsPill.setText(stats.getEventCount() + " events · " + stats.formatSize());
+    private void refreshCourseFooterUi() {
+        weekLabel.setText(calendarTabView.getWeekRangeLabel());
+        if (courseTabView != null) {
+            coursePathBottomLabel.setText(courseTabView.getActiveLocationSummary());
+            exportCourseBtn.setDisable(!courseTabView.hasSelectedCourse());
+            exportAllBtn.setDisable(!courseTabView.hasCourses());
+        } else {
+            coursePathBottomLabel.setText("No course file selected");
+            exportCourseBtn.setDisable(true);
+            exportAllBtn.setDisable(true);
+        }
+    }
+
+    private void refreshStatsAsync() {
+        long seq = statsRequestSeq.incrementAndGet();
+        AppExecutors.ioExecutor().execute(() -> {
+            StorageStats stats = calendarService.getStorageStats();
+            Platform.runLater(() -> {
+                if (statsRequestSeq.get() == seq) {
+                    statsPill.setText(stats.getEventCount() + " events · " + stats.formatSize());
+                }
+            });
+        });
     }
 }

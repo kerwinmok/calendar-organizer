@@ -7,6 +7,7 @@ import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
 import com.calendarorganizer.course.CourseSortOrder;
+import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -60,6 +61,8 @@ public class CourseTabView extends BorderPane {
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
     private final CourseFilePreviewer previewer = new CourseFilePreviewer();
+    private final AtomicLong coursesRequestSeq = new AtomicLong(0L);
+    private final AtomicLong itemsRequestSeq = new AtomicLong(0L);
     private final AtomicLong previewRequestSeq = new AtomicLong(0L);
 
     private final SplitPane splitPane;
@@ -388,7 +391,13 @@ public class CourseTabView extends BorderPane {
 
     public void flushPendingEdits() {
         if (dirty && selectedItem != null && selectedItem.isMarkdown()) {
-            handleSaveItem();
+            try {
+                courseManager.saveItem(selectedItem, editor.getText());
+                setDirty(false);
+                publishStatus("Saved " + selectedItem.getRelativeDisplayPath());
+            } catch (IOException ex) {
+                publishStatus("Save failed: " + ex.getMessage());
+            }
         }
     }
 
@@ -476,15 +485,36 @@ public class CourseTabView extends BorderPane {
     }
 
     public void refreshCourses() {
-        try {
-            allCourses = courseManager.listCourses();
-            applyCourseFilter();
-        } catch (IOException ex) {
-            publishStatus("Failed to load courses: " + ex.getMessage());
-        }
+        refreshCourses(null);
+    }
+
+    private void refreshCourses(Course preferredSelection) {
+        long seq = coursesRequestSeq.incrementAndGet();
+        AppExecutors.ioExecutor().execute(() -> {
+            try {
+                List<Course> loaded = courseManager.listCourses();
+                Platform.runLater(() -> {
+                    if (coursesRequestSeq.get() != seq) {
+                        return;
+                    }
+                    allCourses = loaded;
+                    applyCourseFilter(preferredSelection);
+                });
+            } catch (IOException ex) {
+                Platform.runLater(() -> {
+                    if (coursesRequestSeq.get() == seq) {
+                        publishStatus("Failed to load courses: " + ex.getMessage());
+                    }
+                });
+            }
+        });
     }
 
     private void applyCourseFilter() {
+        applyCourseFilter(null);
+    }
+
+    private void applyCourseFilter(Course preferredSelection) {
         flushPendingEdits();
         List<Course> filtered = new ArrayList<>();
         for (Course course : allCourses) {
@@ -492,10 +522,10 @@ public class CourseTabView extends BorderPane {
                 filtered.add(course);
             }
         }
-        Course previous = selectedCourse;
+        Course target = preferredSelection != null ? preferredSelection : selectedCourse;
         courseListView.getItems().setAll(filtered);
-        if (previous != null && filtered.contains(previous)) {
-            courseListView.getSelectionModel().select(previous);
+        if (target != null && filtered.contains(target)) {
+            courseListView.getSelectionModel().select(target);
         } else if (!filtered.isEmpty()) {
             courseListView.getSelectionModel().selectFirst();
         } else {
@@ -505,25 +535,47 @@ public class CourseTabView extends BorderPane {
     }
 
     private void refreshItems() {
+        refreshItems(null);
+    }
+
+    private void refreshItems(CourseItem preferredSelection) {
         if (selectedCourse == null) {
+            itemsRequestSeq.incrementAndGet();
             itemListView.getItems().clear();
             clearEditor();
             return;
         }
-        try {
-            List<CourseItem> items = courseManager.listItems(selectedCourse, selectedSection, activeSortOrder);
-            CourseItem previous = selectedItem;
-            itemListView.getItems().setAll(items);
-            if (previous != null && items.contains(previous)) {
-                itemListView.getSelectionModel().select(previous);
-            } else if (!items.isEmpty()) {
-                itemListView.getSelectionModel().selectFirst();
-            } else {
-                clearEditor();
+        Course targetCourse = selectedCourse;
+        CourseSection targetSection = selectedSection;
+        CourseSortOrder targetOrder = activeSortOrder;
+        long seq = itemsRequestSeq.incrementAndGet();
+        AppExecutors.ioExecutor().execute(() -> {
+            try {
+                List<CourseItem> items = courseManager.listItems(targetCourse, targetSection, targetOrder);
+                Platform.runLater(() -> {
+                    if (itemsRequestSeq.get() != seq
+                            || !targetCourse.equals(selectedCourse)
+                            || targetSection != selectedSection) {
+                        return;
+                    }
+                    CourseItem target = preferredSelection != null ? preferredSelection : selectedItem;
+                    itemListView.getItems().setAll(items);
+                    if (target != null && items.contains(target)) {
+                        itemListView.getSelectionModel().select(target);
+                    } else if (!items.isEmpty()) {
+                        itemListView.getSelectionModel().selectFirst();
+                    } else {
+                        clearEditor();
+                    }
+                });
+            } catch (IOException ex) {
+                Platform.runLater(() -> {
+                    if (itemsRequestSeq.get() == seq) {
+                        publishStatus("Failed to list course files: " + ex.getMessage());
+                    }
+                });
             }
-        } catch (IOException ex) {
-            publishStatus("Failed to list course files: " + ex.getMessage());
-        }
+        });
     }
 
     private void handleCreateCourse() {
@@ -540,8 +592,7 @@ public class CourseTabView extends BorderPane {
         }
         try {
             Course created = courseManager.createCourse(entered.get());
-            refreshCourses();
-            courseListView.getSelectionModel().select(created);
+            refreshCourses(created);
             publishStatus("Created course: " + created.getDisplayName());
         } catch (IllegalArgumentException | IOException ex) {
             publishStatus("Could not create course: " + ex.getMessage());
@@ -592,8 +643,7 @@ public class CourseTabView extends BorderPane {
         }
         try {
             CourseItem created = courseManager.createItem(selectedCourse, selectedSection, entered.get(), null);
-            refreshItems();
-            itemListView.getSelectionModel().select(created);
+            refreshItems(created);
             publishStatus("Created " + created.getRelativeDisplayPath());
         } catch (IllegalArgumentException | IOException ex) {
             publishStatus("Could not create file: " + ex.getMessage());
@@ -620,13 +670,22 @@ public class CourseTabView extends BorderPane {
         if (selectedItem == null || !selectedItem.isMarkdown()) {
             return;
         }
-        try {
-            courseManager.saveItem(selectedItem, editor.getText());
-            setDirty(false);
-            publishStatus("Saved " + selectedItem.getRelativeDisplayPath());
-        } catch (IOException ex) {
-            publishStatus("Save failed: " + ex.getMessage());
-        }
+        CourseItem target = selectedItem;
+        String content = editor.getText();
+        setDirty(false);
+        AppExecutors.ioExecutor().execute(() -> {
+            try {
+                courseManager.saveItem(target, content);
+                Platform.runLater(() -> publishStatus("Saved " + target.getRelativeDisplayPath()));
+            } catch (IOException ex) {
+                Platform.runLater(() -> {
+                    if (target.equals(selectedItem)) {
+                        setDirty(true);
+                    }
+                    publishStatus("Save failed: " + ex.getMessage());
+                });
+            }
+        });
     }
 
     private void handleImportFilesDialog() {
@@ -679,10 +738,7 @@ public class CourseTabView extends BorderPane {
         task.setOnSucceeded(ev -> {
             ImportBatchResult result = task.getValue();
             if (result.importedCount > 0 && targetCourse.equals(selectedCourse) && targetSection == selectedSection) {
-                refreshItems();
-                if (result.lastImported != null) {
-                    itemListView.getSelectionModel().select(result.lastImported);
-                }
+                refreshItems(result.lastImported);
             }
             if (result.errors.isEmpty()) {
                 publishStatus("Stored " + result.importedCount + " file(s) in "
@@ -748,10 +804,34 @@ public class CourseTabView extends BorderPane {
 
             if (item.isMarkdown()) {
                 showEditorMode();
-                String text = courseManager.readItem(item);
-                editor.setText(text);
-                editor.setDisable(false);
-                saveButton.setDisable(false);
+                editor.setDisable(true);
+                saveButton.setDisable(true);
+                editor.setText("Loading...");
+                AppExecutors.ioExecutor().execute(() -> {
+                    try {
+                        String text = courseManager.readItem(item);
+                        Platform.runLater(() -> {
+                            if (previewRequestSeq.get() != requestId || !item.equals(selectedItem)) {
+                                return;
+                            }
+                            loadingEditor = true;
+                            try {
+                                editor.setText(text);
+                                editor.setDisable(false);
+                                saveButton.setDisable(false);
+                                setDirty(false);
+                            } finally {
+                                loadingEditor = false;
+                            }
+                        });
+                    } catch (IOException ex) {
+                        Platform.runLater(() -> {
+                            if (previewRequestSeq.get() == requestId) {
+                                publishStatus("Could not read file: " + ex.getMessage());
+                            }
+                        });
+                    }
+                });
             } else {
                 saveButton.setDisable(true);
                 editor.setDisable(true);
@@ -1170,6 +1250,30 @@ public class CourseTabView extends BorderPane {
         activePageIndex = 0;
         activeTotalPages = 0;
         hidePreviewNavBar();
+    }
+
+    public void releaseTransientCaches() {
+        previewRequestSeq.incrementAndGet();
+        releasePreviewResources();
+        if (selectedItem != null && !selectedItem.isMarkdown()) {
+            previewTextArea.clear();
+        }
+    }
+
+    public void ensureActivePreviewLoaded() {
+        if (selectedItem != null && !selectedItem.isMarkdown()) {
+            boolean emptyPreview = !pdfPagesListView.isVisible()
+                    && !imageScrollPane.isVisible()
+                    && (!previewBox.isVisible() || previewTextArea.getText().isEmpty());
+            if (emptyPreview) {
+                long requestId = previewRequestSeq.incrementAndGet();
+                try {
+                    loadNonMarkdownPreview(selectedItem, requestId);
+                } catch (IOException ex) {
+                    publishStatus("Could not read file: " + ex.getMessage());
+                }
+            }
+        }
     }
 
     public void shutdownPreviewer() {

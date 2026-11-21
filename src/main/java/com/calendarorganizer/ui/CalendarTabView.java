@@ -7,9 +7,11 @@ import com.calendarorganizer.model.RecurringRule;
 import com.calendarorganizer.model.ScheduleGoal;
 import com.calendarorganizer.model.SchedulePreferences;
 import com.calendarorganizer.scheduler.ScheduleResult;
+import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.ApplySentenceResult;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.service.IcsImportSummary;
+import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -39,6 +41,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public class CalendarTabView extends BorderPane {
@@ -49,6 +52,7 @@ public class CalendarTabView extends BorderPane {
     private final CalendarService service;
     private final WeekGridView weekGridView;
     private final ScrollPane inspectorScroll;
+    private final AtomicLong refreshSeq = new AtomicLong(0L);
 
     private final TextField sleepField = new TextField();
     private final ListView<RecurringRule> rulesList = new ListView<>();
@@ -509,18 +513,28 @@ public class CalendarTabView extends BorderPane {
     }
 
     public void refreshView() {
-        List<CalendarEvent> events = service.getEventsForWeek(currentWeekStart);
-        weekGridView.setWeekData(currentWeekStart, events, selectedEvent);
+        LocalDate targetWeek = currentWeekStart;
+        long seq = refreshSeq.incrementAndGet();
+        AppExecutors.ioExecutor().execute(() -> {
+            List<CalendarEvent> events = service.getEventsForWeek(targetWeek);
+            List<RecurringRule> rules = service.findAllRecurringRules();
+            List<ScheduleGoal> goals = service.findAllGoals();
+            SchedulePreferences prefs = service.loadPreferences();
+            Platform.runLater(() -> {
+                if (refreshSeq.get() != seq) {
+                    return;
+                }
+                weekGridView.setWeekData(targetWeek, events, selectedEvent);
+                rulesList.getItems().setAll(rules);
+                goalsList.getItems().setAll(goals);
+                sleepField.setText(prefs.getSleepTime().format(TIME_FMT));
 
-        rulesList.getItems().setAll(service.findAllRecurringRules());
-        goalsList.getItems().setAll(service.findAllGoals());
-        SchedulePreferences prefs = service.loadPreferences();
-        sleepField.setText(prefs.getSleepTime().format(TIME_FMT));
-
-        updateSelectedPanel();
-        if (onDataChanged != null) {
-            onDataChanged.run();
-        }
+                updateSelectedPanel();
+                if (onDataChanged != null) {
+                    onDataChanged.run();
+                }
+            });
+        });
     }
 
     private void handleDeleteGoal(ScheduleGoal goal) {
