@@ -7,6 +7,7 @@ import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
 import com.calendarorganizer.course.CourseSortOrder;
+import com.calendarorganizer.course.PdfRenderService;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import javafx.application.Platform;
@@ -884,9 +885,11 @@ public class CourseTabView extends BorderPane {
         Task<PdfRenderUiPayload> task = new Task<>() {
             @Override
             protected PdfRenderUiPayload call() throws Exception {
-                CourseFilePreviewer.PdfPageRender render = previewer.renderPdfPage(item.getFilePath(), pageIndex, renderWidth);
-                Image image = loadBoundedImage(render.getPngPath(), 1200);
-                return new PdfRenderUiPayload(render.getPageIndex(), render.getTotalPages(), image);
+                PdfRenderService.PdfMetadata meta = previewer.inspectPdf(item.getFilePath());
+                int total = meta.getPageCount();
+                int safeIndex = Math.max(0, Math.min(total - 1, pageIndex));
+                Image image = previewer.renderPdfPageFxImage(item.getFilePath(), safeIndex, renderWidth);
+                return new PdfRenderUiPayload(safeIndex, total, image);
             }
         };
         task.setOnSucceeded(ev -> {
@@ -913,7 +916,7 @@ public class CourseTabView extends BorderPane {
             hidePreviewNavBar();
             showTextPreviewMode(msg + "\n\nClick 'Open File' above to open this PDF externally.");
         });
-        CalendarService.backgroundExecutor().execute(task);
+        AppExecutors.renderExecutor().execute(task);
     }
 
     private void requestPptxLoad(CourseItem item, long requestId) {
@@ -1070,105 +1073,9 @@ public class CourseTabView extends BorderPane {
 
     private void startRenderAllPdfPages(CourseItem item) {
         cancelPdfRendering();
+        pdfAllPagesMode = false;
         long requestId = previewRequestSeq.incrementAndGet();
-        AtomicBoolean cancelFlag = new AtomicBoolean(false);
-        this.activePdfCancelFlag = cancelFlag;
-
-        Path sessionDir;
-        try {
-            sessionDir = previewer.createPdfCacheSessionDir(requestId);
-        } catch (IOException ex) {
-            publishStatus("Could not prepare PDF cache: " + ex.getMessage());
-            return;
-        }
-
-        this.pdfAllPagesMode = true;
-        this.pdfRenderingAll = true;
-        pdfPagesListView.getItems().clear();
-        showAllPdfPagesMode();
-
-        setButtonVisible(prevPageButton, false);
-        setButtonVisible(nextPageButton, false);
-        setButtonVisible(renderAllPdfButton, false);
-        setButtonVisible(stopRenderButton, true);
-        pageIndicatorLabel.setText("Rendering all pages...");
-        previewNavBar.setVisible(true);
-        previewNavBar.setManaged(true);
-
-        Thread worker = new Thread(() -> {
-            AtomicInteger totalHolder = new AtomicInteger(0);
-            AtomicInteger renderedCount = new AtomicInteger(0);
-            try {
-                previewer.renderAllPdfPages(
-                        item.getFilePath(),
-                        900,
-                        sessionDir,
-                        cancelFlag,
-                        total -> {
-                            totalHolder.set(total);
-                            Platform.runLater(() -> {
-                                if (previewRequestSeq.get() == requestId) {
-                                    this.activeTotalPages = total;
-                                    pageIndicatorLabel.setText("Rendering 0 / " + total + "...");
-                                }
-                            });
-                        },
-                        (pageIdx, pngPath) -> {
-                            int count = renderedCount.incrementAndGet();
-                            Platform.runLater(() -> {
-                                if (previewRequestSeq.get() != requestId) {
-                                    return;
-                                }
-                                pdfPagesListView.getItems().add(pngPath);
-                                int total = totalHolder.get();
-                                if (total > 0) {
-                                    pageIndicatorLabel.setText("Rendering " + count + " / " + total + "...");
-                                } else {
-                                    pageIndicatorLabel.setText("Rendering page " + count + "...");
-                                }
-                            });
-                        }
-                );
-                Platform.runLater(() -> {
-                    if (previewRequestSeq.get() != requestId) {
-                        return;
-                    }
-                    this.pdfRenderingAll = false;
-                    setButtonVisible(stopRenderButton, false);
-                    setButtonVisible(renderAllPdfButton, true);
-                    int count = renderedCount.get();
-                    int total = Math.max(count, totalHolder.get());
-                    if (cancelFlag.get()) {
-                        renderAllPdfButton.setText("Render All");
-                        pageIndicatorLabel.setText("Stopped (" + count + " / " + total + " pages)");
-                        publishStatus("Stopped PDF rendering after " + count + " page(s).");
-                    } else {
-                        renderAllPdfButton.setText("Single Page");
-                        pageIndicatorLabel.setText("All " + total + " pages");
-                        publishStatus("Rendered all " + total + " PDF pages.");
-                    }
-                });
-            } catch (IOException ex) {
-                Platform.runLater(() -> {
-                    if (previewRequestSeq.get() != requestId) {
-                        return;
-                    }
-                    this.pdfRenderingAll = false;
-                    setButtonVisible(stopRenderButton, false);
-                    setButtonVisible(renderAllPdfButton, true);
-                    renderAllPdfButton.setText("Render All");
-                    if (renderedCount.get() == 0) {
-                        this.pdfAllPagesMode = false;
-                        hidePreviewNavBar();
-                        showTextPreviewMode(ex.getMessage() + "\n\nClick 'Open File' above to open this PDF externally.");
-                    } else {
-                        pageIndicatorLabel.setText("Stopped (" + renderedCount.get() + " pages): " + ex.getMessage());
-                    }
-                });
-            }
-        }, "pdf-render-all");
-        worker.setDaemon(true);
-        worker.start();
+        requestPdfPageRender(item, activePageIndex, requestId);
     }
 
     private void handleStopPdfRender() {
@@ -1178,7 +1085,6 @@ public class CourseTabView extends BorderPane {
 
     private void cancelPdfRendering() {
         activePdfCancelFlag.set(true);
-        previewer.cancelActivePdfRender();
     }
 
     private void showContentNode(Region active) {

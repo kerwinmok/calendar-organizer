@@ -38,16 +38,18 @@ try {
         --main-class "com.calendarorganizer.Launcher" `
         --app-version "1.0.0" `
         --icon $iconPath `
-        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,jdk.crypto.ec,jdk.unsupported" `
+        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.unsupported" `
         --java-options "-Xms16m" `
-        --java-options "-Xmx128m" `
+        --java-options "-Xmx192m" `
         --java-options "-XX:+UseSerialGC" `
         --java-options "-XX:TieredStopAtLevel=1" `
-        --java-options "-XX:ReservedCodeCacheSize=20m" `
+        --java-options "-XX:ReservedCodeCacheSize=24m" `
         --java-options "-Xss384k" `
         --java-options "-XX:MinHeapFreeRatio=10" `
         --java-options "-XX:MaxHeapFreeRatio=20" `
+        --java-options "-Djava.awt.headless=true" `
         --java-options "-Dprism.order=sw" `
+        --java-options "--enable-native-access=ALL-UNNAMED" `
         --dest $stageDir
 
     if ($LASTEXITCODE -ne 0) {

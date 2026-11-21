@@ -1,28 +1,32 @@
 package com.calendarorganizer.course;
 
-import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CourseFilePreviewerTest {
 
     private final CourseFilePreviewer previewer = new CourseFilePreviewer();
+
+    @AfterEach
+    void tearDown() {
+        previewer.cleanupAllPdfCaches();
+    }
 
     @Test
     void detectsSupportedFileKinds() {
@@ -83,10 +87,7 @@ class CourseFilePreviewerTest {
     }
 
     @Test
-    void rendersPdfPageOnWindows(@TempDir Path tempDir) throws IOException {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        Assumptions.assumeTrue(os.contains("win"));
-
+    void inspectsAndRendersSingleAndMultiPagePdfsViaPdfBox(@TempDir Path tempDir) throws IOException {
         Path pdf = tempDir.resolve("sample.pdf");
         String minimalPdf = "%PDF-1.4\n"
                 + "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
@@ -110,58 +111,22 @@ class CourseFilePreviewerTest {
                 + "%%EOF\n";
         Files.writeString(pdf, minimalPdf, StandardCharsets.US_ASCII);
 
-        CourseFilePreviewer.PdfPageRender rendered = previewer.renderPdfPage(pdf, 0, 800);
-        assertEquals(0, rendered.getPageIndex());
-        assertEquals(1, rendered.getTotalPages());
-        assertTrue(Files.isRegularFile(rendered.getPngPath()));
-        assertTrue(Files.size(rendered.getPngPath()) > 500L);
-    }
+        PdfRenderService.PdfMetadata singleMeta = previewer.inspectPdf(pdf);
+        assertEquals(1, singleMeta.getPageCount());
+        assertEquals(792.0 / 612.0, singleMeta.getAspectRatio(0), 0.02);
 
-    @Test
-    void rendersAllPdfPagesAndStopsEarlyOnCancel(@TempDir Path tempDir) throws IOException {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        Assumptions.assumeTrue(os.contains("win"));
+        BufferedImage page0 = previewer.renderPdfPageImage(pdf, 0, 800);
+        assertNotNull(page0);
+        assertTrue(page0.getWidth() >= 780 && page0.getWidth() <= 820);
+        assertTrue(page0.getHeight() > 900);
 
-        Path pdf = createMultiPageSamplePdf(tempDir.resolve("five-pages.pdf"), 5);
-        Path fullOut = tempDir.resolve("full");
-        AtomicInteger reportedTotal = new AtomicInteger(0);
-        List<Path> renderedPages = new ArrayList<>();
+        Path multiPdf = createMultiPageSamplePdf(tempDir.resolve("five-pages.pdf"), 5);
+        PdfRenderService.PdfMetadata multiMeta = previewer.inspectPdf(multiPdf);
+        assertEquals(5, multiMeta.getPageCount());
 
-        previewer.renderAllPdfPages(
-                pdf,
-                700,
-                fullOut,
-                new AtomicBoolean(false),
-                reportedTotal::set,
-                (idx, path) -> renderedPages.add(path)
-        );
-
-        assertEquals(5, reportedTotal.get());
-        assertEquals(5, renderedPages.size());
-        for (Path png : renderedPages) {
-            assertTrue(Files.isRegularFile(png));
-            assertTrue(Files.size(png) > 500L);
-        }
-
-        Path cancelOut = tempDir.resolve("cancelled");
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        AtomicInteger stoppedCount = new AtomicInteger(0);
-
-        previewer.renderAllPdfPages(
-                pdf,
-                700,
-                cancelOut,
-                cancelled,
-                t -> {
-                },
-                (idx, path) -> {
-                    stoppedCount.incrementAndGet();
-                    cancelled.set(true);
-                    previewer.cancelActivePdfRender();
-                }
-        );
-
-        assertEquals(1, stoppedCount.get());
+        BufferedImage page4 = previewer.renderPdfPageImage(multiPdf, 4, 600);
+        assertNotNull(page4);
+        assertTrue(page4.getWidth() >= 580 && page4.getWidth() <= 620);
     }
 
     private Path createMultiPageSamplePdf(Path target, int pageCount) throws IOException {

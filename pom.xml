@@ -17,6 +17,7 @@
         <sqlite.version>3.54.1.0</sqlite.version>
         <gson.version>2.15.0</gson.version>
         <slf4j.version>2.0.20</slf4j.version>
+        <pdfbox.version>3.0.8</pdfbox.version>
         <junit.version>5.14.4</junit.version>
     </properties>
 
@@ -52,6 +53,11 @@
             <version>${slf4j.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.version}</version>
@@ -80,6 +86,19 @@
                 <version>0.0.8</version>
                 <configuration>
                     <mainClass>com.calendarorganizer.MainApp</mainClass>
+                    <options>
+                        <option>-Xms16m</option>
+                        <option>-Xmx192m</option>
+                        <option>-XX:+UseSerialGC</option>
+                        <option>-XX:TieredStopAtLevel=1</option>
+                        <option>-XX:ReservedCodeCacheSize=24m</option>
+                        <option>-Xss384k</option>
+                        <option>-XX:MinHeapFreeRatio=10</option>
+                        <option>-XX:MaxHeapFreeRatio=20</option>
+                        <option>-Djava.awt.headless=true</option>
+                        <option>-Dprism.order=sw</option>
+                        <option>--enable-native-access=ALL-UNNAMED</option>
+                    </options>
                 </configuration>
             </plugin>
             <plugin>
