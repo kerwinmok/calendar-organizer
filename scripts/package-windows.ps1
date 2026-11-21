@@ -40,7 +40,7 @@ try {
         --icon $iconPath `
         --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.unsupported" `
         --java-options "-Xms16m" `
-        --java-options "-Xmx128m" `
+        --java-options "-Xmx192m" `
         --java-options "-XX:+UseSerialGC" `
         --java-options "-XX:TieredStopAtLevel=1" `
         --java-options "-XX:ReservedCodeCacheSize=20m" `

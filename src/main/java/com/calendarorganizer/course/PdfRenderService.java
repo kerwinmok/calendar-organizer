@@ -76,8 +76,8 @@ public class PdfRenderService implements AutoCloseable {
 
     private static final int MAX_OPEN_DOCS = 1;
     private static final int MIN_WIDTH_PX = 240;
-    private static final int MAX_WIDTH_PX = 2200;
-    private static final long MAX_RENDER_PIXELS = 3_500_000L;
+    private static final int MAX_WIDTH_PX = 1200;
+    private static final long MAX_RENDER_PIXELS = 1_600_000L;
 
     private final PdfPageCache pageCache;
     private final Object docsLock = new Object();
@@ -159,7 +159,12 @@ public class PdfRenderService implements AutoCloseable {
                     return rechecked;
                 }
                 BufferedImage buffered = renderWithHandle(handle, safePage, bucket);
-                WritableImage fxImage = toWritableImage(buffered);
+                WritableImage fxImage;
+                try {
+                    fxImage = toWritableImage(buffered);
+                } finally {
+                    buffered.flush();
+                }
                 long estimateBytes = (long) buffered.getWidth() * buffered.getHeight() * 4L;
                 pageCache.put(key, fxImage, estimateBytes);
                 return fxImage;

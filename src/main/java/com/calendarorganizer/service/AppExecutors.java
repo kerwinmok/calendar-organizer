@@ -28,7 +28,7 @@ public final class AppExecutors {
     public static Executor renderExecutor() {
         synchronized (LOCK) {
             if (renderPool == null || renderPool.isShutdown()) {
-                renderPool = createBoundedPool(2, 20L, "calendar-render-");
+                renderPool = createBoundedPool(1, 20L, "calendar-render-");
             }
             return renderPool;
         }

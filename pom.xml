@@ -88,7 +88,7 @@
                     <mainClass>com.calendarorganizer.MainApp</mainClass>
                     <options>
                         <option>-Xms16m</option>
-                        <option>-Xmx128m</option>
+                        <option>-Xmx192m</option>
                         <option>-XX:+UseSerialGC</option>
                         <option>-XX:TieredStopAtLevel=1</option>
                         <option>-XX:ReservedCodeCacheSize=20m</option>
