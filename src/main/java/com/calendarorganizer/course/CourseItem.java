@@ -24,6 +24,14 @@ public class CourseItem {
         this.lastModifiedMillis = lastModifiedMillis;
     }
 
+    public Course getCourse() {
+        return course;
+    }
+
+    public CourseSection getSection() {
+        return section;
+    }
+
     public String getFileName() {
         return fileName;
     }

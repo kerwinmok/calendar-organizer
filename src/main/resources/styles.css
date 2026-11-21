@@ -719,3 +719,42 @@
     -fx-border-radius: 4;
     -fx-background-radius: 4;
 }
+
+.render-pane {
+    -fx-background-color: -lc-canvas;
+    -fx-border-color: -lc-divider;
+    -fx-border-width: 0 0 0 1;
+}
+
+.render-file-banner {
+    -fx-background-color: -lc-chrome;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 8 12 8 12;
+}
+
+.render-section-pill {
+    -fx-background-color: -lc-active;
+    -fx-text-fill: -lc-text;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-padding: 2 7 2 7;
+    -fx-background-radius: 4;
+}
+
+.render-text-card {
+    -fx-background-color: -lc-inset;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 12 14 12 14;
+}
+
+.render-text-body {
+    -fx-text-fill: -lc-text;
+    -fx-font-family: "Segoe UI", system-ui, sans-serif;
+    -fx-line-spacing: 3px;
+}
