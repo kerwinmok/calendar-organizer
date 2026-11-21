@@ -32,7 +32,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -43,12 +42,6 @@ public class CalendarService {
     private static final String PREF_OLLAMA_HOST = "ollama_host";
     private static final String PREF_OLLAMA_MODEL = "ollama_model";
     private static final String PREF_COURSE_SORT = "course_sort_order";
-
-    private static final Executor SHARED_BG_EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "calendar-bg-worker");
-        thread.setDaemon(true);
-        return thread;
-    });
 
     private static final Executor HTTP_EXECUTOR = createHttpExecutor();
     private static final Object HTTP_CLIENT_LOCK = new Object();
@@ -146,7 +139,7 @@ public class CalendarService {
     }
 
     public static Executor backgroundExecutor() {
-        return SHARED_BG_EXECUTOR;
+        return AppExecutors.ioExecutor();
     }
 
     public CalendarService(CalendarRepository repository,

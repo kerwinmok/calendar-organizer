@@ -4,6 +4,7 @@ import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.llm.ParserMode;
+import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.StorageStats;
 import javafx.geometry.Pos;
@@ -291,6 +292,7 @@ public class MainWindow extends BorderPane {
     public void shutdown() {
         flushPendingEdits();
         courseTabView.shutdownPreviewer();
+        AppExecutors.shutdown();
     }
 
     public void applyTheme(UiTheme theme) {
