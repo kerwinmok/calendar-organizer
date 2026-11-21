@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.course.Course;
 import com.calendarorganizer.course.CourseExporter;
+import com.calendarorganizer.course.CourseFilePreviewer;
 import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
@@ -17,9 +18,12 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputDialog;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
@@ -29,23 +33,29 @@ import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public class CourseTabView extends BorderPane {
 
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
+    private final CourseFilePreviewer previewer = new CourseFilePreviewer();
+    private final AtomicLong previewRequestSeq = new AtomicLong(0L);
 
     private final SplitPane splitPane;
     private final VBox coursesRail;
@@ -57,6 +67,15 @@ public class CourseTabView extends BorderPane {
     private final Label pathHeader = new Label("No file selected");
     private final Label dirtyIndicator = new Label("");
     private final TextArea editor = new TextArea();
+    private final HBox previewNavBar = new HBox(8);
+    private final Button prevPageButton = new Button("< Prev");
+    private final Button nextPageButton = new Button("Next >");
+    private final Label pageIndicatorLabel = new Label("");
+    private final TextArea previewTextArea = new TextArea();
+    private final ImageView pptxThumbView = new ImageView();
+    private final VBox previewBox = new VBox(8);
+    private final ImageView previewImageView = new ImageView();
+    private final ScrollPane imageScrollPane = new ScrollPane();
     private final Button saveButton = new Button("Save");
     private final Button openFileButton = new Button("Open File");
     private final Button openFolderButton = new Button("Open Folder");
@@ -71,6 +90,10 @@ public class CourseTabView extends BorderPane {
     private CourseSection selectedSection = CourseSection.LECTURES;
     private CourseSortOrder activeSortOrder = CourseSortOrder.NAME_ASC;
     private CourseItem selectedItem;
+    private CourseFilePreviewer.PreviewKind activePreviewKind = CourseFilePreviewer.PreviewKind.UNSUPPORTED;
+    private List<String> activePptxSlides = List.of();
+    private int activePageIndex;
+    private int activeTotalPages;
     private boolean dirty;
     private boolean loadingEditor;
     private boolean railVisible = true;
@@ -242,10 +265,16 @@ public class CourseTabView extends BorderPane {
         topBar.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(pathHeader, Priority.ALWAYS);
 
+        pageIndicatorLabel.getStyleClass().add("dim-label");
+        prevPageButton.setOnAction(e -> stepPreviewPage(-1));
+        nextPageButton.setOnAction(e -> stepPreviewPage(1));
+        previewNavBar.setAlignment(Pos.CENTER_LEFT);
+        previewNavBar.getChildren().setAll(prevPageButton, pageIndicatorLabel, nextPageButton);
+        hidePreviewNavBar();
+
         editor.getStyleClass().add("markdown-editor");
         editor.setWrapText(true);
         editor.setDisable(true);
-        VBox.setVgrow(editor, Priority.ALWAYS);
         editor.textProperty().addListener((obs, oldVal, newVal) -> {
             if (!loadingEditor && selectedItem != null && selectedItem.isMarkdown()) {
                 setDirty(true);
@@ -260,7 +289,34 @@ public class CourseTabView extends BorderPane {
             }
         });
 
-        VBox pane = new VBox(8, topBar, editor);
+        previewTextArea.getStyleClass().add("markdown-editor");
+        previewTextArea.setEditable(false);
+        previewTextArea.setWrapText(true);
+        VBox.setVgrow(previewTextArea, Priority.ALWAYS);
+
+        pptxThumbView.setPreserveRatio(true);
+        pptxThumbView.setFitHeight(150);
+        pptxThumbView.setVisible(false);
+        pptxThumbView.setManaged(false);
+
+        previewBox.getChildren().setAll(pptxThumbView, previewTextArea);
+        previewBox.setVisible(false);
+        previewBox.setManaged(false);
+
+        previewImageView.setPreserveRatio(true);
+        previewImageView.setSmooth(true);
+        StackPane imageHolder = new StackPane(previewImageView);
+        imageHolder.setPadding(new Insets(6));
+        imageScrollPane.setContent(imageHolder);
+        imageScrollPane.setFitToWidth(true);
+        imageScrollPane.widthProperty().addListener((obs, oldW, newW) -> updateImageFitWidth(newW.doubleValue()));
+        imageScrollPane.setVisible(false);
+        imageScrollPane.setManaged(false);
+
+        StackPane contentHost = new StackPane(editor, previewBox, imageScrollPane);
+        VBox.setVgrow(contentHost, Priority.ALWAYS);
+
+        VBox pane = new VBox(8, topBar, previewNavBar, contentHost);
         pane.getStyleClass().add("lc-canvas-pane");
         pane.setPadding(new Insets(10));
         return pane;
@@ -627,28 +683,25 @@ public class CourseTabView extends BorderPane {
         if (selectedItem != null && !selectedItem.equals(item)) {
             flushPendingEdits();
         }
+        long requestId = previewRequestSeq.incrementAndGet();
         loadingEditor = true;
         try {
             selectedItem = item;
             pathHeader.setText(item.getRelativeDisplayPath());
             deleteItemButton.setDisable(false);
             openFileButton.setDisable(false);
+            releasePreviewResources();
 
             if (item.isMarkdown()) {
+                showEditorMode();
                 String text = courseManager.readItem(item);
                 editor.setText(text);
                 editor.setDisable(false);
                 saveButton.setDisable(false);
             } else {
-                long bytes = Files.size(item.getFilePath());
-                long kb = Math.max(1L, Math.round(bytes / 1024.0));
-                editor.setText("Stored locally at:\n"
-                        + item.getFilePath().toAbsolutePath() + "\n"
-                        + "Size: " + kb + " KB\n\n"
-                        + "Click 'Open File' above (or double-click the file in the list) to open this file in your default application,\n"
-                        + "or click 'Open Folder' to view it in Windows Explorer.");
-                editor.setDisable(true);
                 saveButton.setDisable(true);
+                editor.setDisable(true);
+                loadNonMarkdownPreview(item, requestId);
             }
             setDirty(false);
         } catch (IOException ex) {
@@ -658,10 +711,274 @@ public class CourseTabView extends BorderPane {
         }
     }
 
+    private void loadNonMarkdownPreview(CourseItem item, long requestId) throws IOException {
+        Path filePath = item.getFilePath();
+        CourseFilePreviewer.PreviewKind kind = previewer.detectKind(filePath);
+        this.activePreviewKind = kind;
+
+        switch (kind) {
+            case PDF:
+                showTextPreviewMode("Rendering PDF preview...");
+                requestPdfPageRender(item, 0, requestId);
+                break;
+            case PPTX:
+                showTextPreviewMode("Loading PowerPoint slides...");
+                requestPptxLoad(item, requestId);
+                break;
+            case IMAGE:
+                showTextPreviewMode("Loading image preview...");
+                requestImagePreview(item, requestId);
+                break;
+            case TEXT:
+                showTextPreviewMode("Loading text preview...");
+                requestTextPreview(item, requestId);
+                break;
+            default:
+                long bytes = Files.size(filePath);
+                long kb = Math.max(1L, Math.round(bytes / 1024.0));
+                showTextPreviewMode("Stored locally at:\n"
+                        + filePath.toAbsolutePath() + "\n"
+                        + "Size: " + kb + " KB\n\n"
+                        + "No built-in preview for this file type.\n"
+                        + "Click 'Open File' above (or double-click in the list) to open it externally.");
+                break;
+        }
+    }
+
+    private void requestPdfPageRender(CourseItem item, int pageIndex, long requestId) {
+        int renderWidth = (int) Math.max(700.0, Math.min(1200.0, imageScrollPane.getWidth() - 28.0));
+        Task<PdfRenderUiPayload> task = new Task<>() {
+            @Override
+            protected PdfRenderUiPayload call() throws Exception {
+                CourseFilePreviewer.PdfPageRender render = previewer.renderPdfPage(item.getFilePath(), pageIndex, renderWidth);
+                Image image = loadBoundedImage(render.getPngPath(), 1200);
+                return new PdfRenderUiPayload(render.getPageIndex(), render.getTotalPages(), image);
+            }
+        };
+        task.setOnSucceeded(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            PdfRenderUiPayload payload = task.getValue();
+            this.activePageIndex = payload.pageIndex;
+            this.activeTotalPages = payload.totalPages;
+            previewImageView.setImage(payload.image);
+            showImagePreviewMode();
+            updateImageFitWidth(imageScrollPane.getWidth());
+            updatePreviewNavBar("Page " + (payload.pageIndex + 1) + " / " + payload.totalPages, payload.pageIndex, payload.totalPages);
+        });
+        task.setOnFailed(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            Throwable err = task.getException();
+            String msg = "Could not preview PDF.";
+            if (err != null && err.getMessage() != null && !err.getMessage().isBlank()) {
+                msg = err.getMessage();
+            }
+            hidePreviewNavBar();
+            showTextPreviewMode(msg + "\n\nClick 'Open File' above to open this PDF externally.");
+        });
+        CalendarService.backgroundExecutor().execute(task);
+    }
+
+    private void requestPptxLoad(CourseItem item, long requestId) {
+        Task<CourseFilePreviewer.PptxPreview> task = new Task<>() {
+            @Override
+            protected CourseFilePreviewer.PptxPreview call() throws Exception {
+                return previewer.extractPptx(item.getFilePath());
+            }
+        };
+        task.setOnSucceeded(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            CourseFilePreviewer.PptxPreview pptx = task.getValue();
+            this.activePptxSlides = pptx.getSlides();
+            this.activePageIndex = 0;
+            this.activeTotalPages = activePptxSlides.size();
+
+            if (pptx.getThumbnailBytes() != null) {
+                Image thumb = new Image(new ByteArrayInputStream(pptx.getThumbnailBytes()), 320, 150, true, true);
+                pptxThumbView.setImage(thumb);
+                pptxThumbView.setVisible(true);
+                pptxThumbView.setManaged(true);
+            }
+            showActivePptxSlide();
+        });
+        task.setOnFailed(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            Throwable err = task.getException();
+            String msg = "Could not extract slides from presentation.";
+            if (err != null && err.getMessage() != null) {
+                msg = msg + "\n" + err.getMessage();
+            }
+            hidePreviewNavBar();
+            showTextPreviewMode(msg + "\n\nClick 'Open File' above to view this presentation in PowerPoint.");
+        });
+        CalendarService.backgroundExecutor().execute(task);
+    }
+
+    private void showActivePptxSlide() {
+        if (activePptxSlides.isEmpty()) {
+            return;
+        }
+        String text = activePptxSlides.get(activePageIndex);
+        showTextPreviewMode(text);
+        updatePreviewNavBar("Slide " + (activePageIndex + 1) + " / " + activePptxSlides.size(), activePageIndex, activePptxSlides.size());
+    }
+
+    private void requestImagePreview(CourseItem item, long requestId) {
+        Task<Image> task = new Task<>() {
+            @Override
+            protected Image call() throws Exception {
+                return loadBoundedImage(item.getFilePath(), 1200);
+            }
+        };
+        task.setOnSucceeded(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            previewImageView.setImage(task.getValue());
+            showImagePreviewMode();
+            updateImageFitWidth(imageScrollPane.getWidth());
+        });
+        task.setOnFailed(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            showTextPreviewMode("Could not load image preview.\n\nClick 'Open File' above to open it externally.");
+        });
+        CalendarService.backgroundExecutor().execute(task);
+    }
+
+    private void requestTextPreview(CourseItem item, long requestId) {
+        Task<String> task = new Task<>() {
+            @Override
+            protected String call() throws Exception {
+                return previewer.extractTextPreview(item.getFilePath());
+            }
+        };
+        task.setOnSucceeded(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            showTextPreviewMode(task.getValue());
+        });
+        task.setOnFailed(ev -> {
+            if (previewRequestSeq.get() != requestId) {
+                return;
+            }
+            showTextPreviewMode("Could not load text preview.\n\nClick 'Open File' above to open it externally.");
+        });
+        CalendarService.backgroundExecutor().execute(task);
+    }
+
+    private void stepPreviewPage(int delta) {
+        if (selectedItem == null) {
+            return;
+        }
+        if (activePreviewKind == CourseFilePreviewer.PreviewKind.PPTX && !activePptxSlides.isEmpty()) {
+            int next = Math.max(0, Math.min(activePptxSlides.size() - 1, activePageIndex + delta));
+            if (next != activePageIndex) {
+                activePageIndex = next;
+                showActivePptxSlide();
+            }
+        } else if (activePreviewKind == CourseFilePreviewer.PreviewKind.PDF && activeTotalPages > 0) {
+            int next = Math.max(0, Math.min(activeTotalPages - 1, activePageIndex + delta));
+            if (next != activePageIndex) {
+                long requestId = previewRequestSeq.incrementAndGet();
+                prevPageButton.setDisable(true);
+                nextPageButton.setDisable(true);
+                pageIndicatorLabel.setText("Rendering page " + (next + 1) + " / " + activeTotalPages + "...");
+                requestPdfPageRender(selectedItem, next, requestId);
+            }
+        }
+    }
+
+    private Image loadBoundedImage(Path imagePath, int maxWidth) throws IOException {
+        try (InputStream is = Files.newInputStream(imagePath)) {
+            return new Image(is, maxWidth, 0, true, true);
+        }
+    }
+
+    private void updateImageFitWidth(double viewportWidth) {
+        Image img = previewImageView.getImage();
+        if (img == null || viewportWidth <= 40.0) {
+            previewImageView.setFitWidth(0.0);
+            return;
+        }
+        double avail = viewportWidth - 28.0;
+        if (activePreviewKind == CourseFilePreviewer.PreviewKind.PDF || img.getWidth() > avail) {
+            previewImageView.setFitWidth(Math.max(200.0, avail));
+        } else {
+            previewImageView.setFitWidth(0.0);
+        }
+    }
+
+    private void showEditorMode() {
+        editor.setVisible(true);
+        editor.setManaged(true);
+        previewBox.setVisible(false);
+        previewBox.setManaged(false);
+        imageScrollPane.setVisible(false);
+        imageScrollPane.setManaged(false);
+    }
+
+    private void showTextPreviewMode(String text) {
+        previewTextArea.setText(text);
+        previewTextArea.positionCaret(0);
+        previewBox.setVisible(true);
+        previewBox.setManaged(true);
+        editor.setVisible(false);
+        editor.setManaged(false);
+        imageScrollPane.setVisible(false);
+        imageScrollPane.setManaged(false);
+    }
+
+    private void showImagePreviewMode() {
+        imageScrollPane.setVisible(true);
+        imageScrollPane.setManaged(true);
+        imageScrollPane.setVvalue(0.0);
+        editor.setVisible(false);
+        editor.setManaged(false);
+        previewBox.setVisible(false);
+        previewBox.setManaged(false);
+    }
+
+    private void updatePreviewNavBar(String label, int index, int total) {
+        pageIndicatorLabel.setText(label);
+        prevPageButton.setDisable(index <= 0);
+        nextPageButton.setDisable(index >= total - 1);
+        previewNavBar.setVisible(true);
+        previewNavBar.setManaged(true);
+    }
+
+    private void hidePreviewNavBar() {
+        previewNavBar.setVisible(false);
+        previewNavBar.setManaged(false);
+    }
+
+    private void releasePreviewResources() {
+        previewImageView.setImage(null);
+        pptxThumbView.setImage(null);
+        pptxThumbView.setVisible(false);
+        pptxThumbView.setManaged(false);
+        activePptxSlides = List.of();
+        activePageIndex = 0;
+        activeTotalPages = 0;
+        hidePreviewNavBar();
+    }
+
     private void clearEditor() {
+        previewRequestSeq.incrementAndGet();
         loadingEditor = true;
         selectedItem = null;
         pathHeader.setText("No file selected");
+        releasePreviewResources();
+        showEditorMode();
         editor.clear();
         editor.setDisable(true);
         deleteItemButton.setDisable(true);
@@ -767,6 +1084,18 @@ public class CourseTabView extends BorderPane {
             this.importedCount = importedCount;
             this.lastImported = lastImported;
             this.errors = errors;
+        }
+    }
+
+    private static class PdfRenderUiPayload {
+        final int pageIndex;
+        final int totalPages;
+        final Image image;
+
+        PdfRenderUiPayload(int pageIndex, int totalPages, Image image) {
+            this.pageIndex = pageIndex;
+            this.totalPages = totalPages;
+            this.image = image;
         }
     }
 }
