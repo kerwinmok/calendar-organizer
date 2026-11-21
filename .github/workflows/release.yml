@@ -1,0 +1,125 @@
+name: Release Windows App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-release:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Resolve version and tag
+        id: meta
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+          } else {
+            $raw = "${{ github.event.inputs.version }}".Trim()
+            if ([string]::IsNullOrWhiteSpace($raw)) {
+              $raw = "1.0.0"
+            }
+            $tag = if ($raw.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+              "v" + $raw.Substring(1)
+            } else {
+              "v$raw"
+            }
+          }
+          $version = $tag.TrimStart('v', 'V')
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Build Windows bundle, installer, and checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          if ($null -eq $candle) {
+            $candidates = @()
+            if (-not [string]::IsNullOrWhiteSpace($env:WIX)) {
+              $candidates += (Join-Path $env:WIX "bin")
+            }
+            $candidates += @(Get-ChildItem -Path "C:\Program Files (x86)\WiX Toolset*\bin" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+            foreach ($dir in $candidates) {
+              if (Test-Path (Join-Path $dir "candle.exe")) {
+                $env:PATH = "$dir;$env:PATH"
+                $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+                break
+              }
+            }
+          }
+          if ($null -eq $candle) {
+            throw "WiX Toolset v3 (candle.exe) was not found on the runner."
+          }
+          Write-Output "Using WiX candle.exe at: $($candle.Source)"
+
+          $version = "${{ steps.meta.outputs.version }}"
+          & .\scripts\package-windows.ps1 -Installer -AppVersion "$version"
+          if ($LASTEXITCODE -ne 0) {
+            throw "package-windows.ps1 failed"
+          }
+
+          $distDir = "target\dist"
+          $exeName = "CalendarOrganizer-$version.exe"
+          $zipName = "CalendarOrganizer-windows-x64.zip"
+          $lines = @()
+          foreach ($name in @($exeName, $zipName)) {
+            $hash = (Get-FileHash -Path (Join-Path $distDir $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $lines += "$hash  $name"
+          }
+          $lines | Set-Content -Path (Join-Path $distDir "SHA256SUMS.txt") -Encoding ascii
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $version = "${{ steps.meta.outputs.version }}"
+          $exeName = "CalendarOrganizer-$version.exe"
+          $exePath = "target\dist\$exeName"
+          $zipPath = "target\dist\CalendarOrganizer-windows-x64.zip"
+          $sumsPath = "target\dist\SHA256SUMS.txt"
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+
+          $notesLines = @(
+            "## Windows Downloads (No Java Required)"
+            ""
+            "- **Windows Installer (``$exeName``)**: Download and double-click to install per-user (no admin rights required) with Desktop and Start Menu shortcuts."
+            "- **Portable Zip (``CalendarOrganizer-windows-x64.zip``)**: Extract all files and double-click ``CalendarOrganizer.exe``."
+            "- **Checksums**: SHA-256 hashes in ``SHA256SUMS.txt``."
+            ""
+            "> Note: Releases are unsigned, so Windows SmartScreen may ask on first launch (click **More info** -> **Run anyway**). If Windows 11 Smart App Control is set to strict enforcement, build locally with ``.\scripts\package-windows.ps1 -Install -DesktopShortcut``."
+          )
+          $notesLines | Set-Content -Path $notesPath -Encoding utf8
+
+          & gh release view "$tag" > $null 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            & gh release upload "$tag" "$exePath" "$zipPath" "$sumsPath" --clobber
+          } else {
+            & gh release create "$tag" "$exePath" "$zipPath" "$sumsPath" --title "Calendar Organizer $tag" --notes-file "$notesPath"
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish GitHub release for $tag"
+          }
