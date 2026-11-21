@@ -195,6 +195,10 @@ class CalendarServiceTest {
 
         realService.saveOllamaSettings("", "");
         assertEquals(OllamaProvider.DEFAULT_MODEL, realService.loadOllamaModel());
+
+        assertEquals("name_asc", realService.loadCourseSortOrder());
+        realService.saveCourseSortOrder("oldest");
+        assertEquals("oldest", realService.loadCourseSortOrder());
     }
 
     @Test

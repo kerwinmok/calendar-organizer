@@ -42,6 +42,7 @@ public class CalendarService {
     private static final String PREF_GEMINI_API_KEY = "gemini_api_key";
     private static final String PREF_OLLAMA_HOST = "ollama_host";
     private static final String PREF_OLLAMA_MODEL = "ollama_model";
+    private static final String PREF_COURSE_SORT = "course_sort_order";
 
     private static final Executor SHARED_BG_EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "calendar-bg-worker");
@@ -361,5 +362,13 @@ public class CalendarService {
         } else {
             repository.savePreference(PREF_OLLAMA_MODEL, model.trim());
         }
+    }
+
+    public String loadCourseSortOrder() {
+        return repository.loadPreference(PREF_COURSE_SORT, "name_asc");
+    }
+
+    public void saveCourseSortOrder(String sortId) {
+        repository.savePreference(PREF_COURSE_SORT, sortId);
     }
 }

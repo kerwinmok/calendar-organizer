@@ -5,6 +5,7 @@ import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseItem;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
+import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.service.CalendarService;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -13,6 +14,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.SplitPane;
@@ -49,6 +51,7 @@ public class CourseTabView extends BorderPane {
     private final VBox coursesRail;
     private final ListView<Course> courseListView = new ListView<>();
     private final List<Button> sectionButtons = new ArrayList<>();
+    private final ComboBox<CourseSortOrder> sortBox = new ComboBox<>();
     private final ListView<CourseItem> itemListView = new ListView<>();
     private final Label courseHeading = new Label("Select a course");
     private final Label pathHeader = new Label("No file selected");
@@ -66,6 +69,7 @@ public class CourseTabView extends BorderPane {
     private String filterText = "";
     private Course selectedCourse;
     private CourseSection selectedSection = CourseSection.LECTURES;
+    private CourseSortOrder activeSortOrder = CourseSortOrder.NAME_ASC;
     private CourseItem selectedItem;
     private boolean dirty;
     private boolean loadingEditor;
@@ -74,6 +78,7 @@ public class CourseTabView extends BorderPane {
     private String lastStatus = "Ready.";
     private Consumer<String> onStatusChanged;
     private Runnable onStateChanged;
+    private Consumer<CourseSortOrder> onSortOrderChanged;
 
     public CourseTabView(CourseManager courseManager, CourseExporter courseExporter) {
         this.courseManager = courseManager;
@@ -150,6 +155,25 @@ public class CourseTabView extends BorderPane {
         }
         updateSectionButtons();
 
+        sortBox.getItems().setAll(CourseSortOrder.values());
+        sortBox.setValue(activeSortOrder);
+        sortBox.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(sortBox, Priority.ALWAYS);
+        sortBox.setOnAction(e -> {
+            CourseSortOrder chosen = sortBox.getValue();
+            if (chosen != null && chosen != activeSortOrder) {
+                activeSortOrder = chosen;
+                if (onSortOrderChanged != null) {
+                    onSortOrderChanged.accept(chosen);
+                }
+                refreshItems();
+            }
+        });
+        Label sortLabel = new Label("Sort");
+        sortLabel.getStyleClass().add("dim-label");
+        HBox sortRow = new HBox(8, sortLabel, sortBox);
+        sortRow.setAlignment(Pos.CENTER_LEFT);
+
         VBox.setVgrow(itemListView, Priority.ALWAYS);
         itemListView.getSelectionModel().selectedItemProperty().addListener((obs, oldItem, newItem) -> {
             if (newItem != null) {
@@ -175,7 +199,7 @@ public class CourseTabView extends BorderPane {
         deleteItemButton.setOnAction(e -> handleDeleteItem());
 
         HBox buttons = new HBox(6, newItemButton, importFileButton, deleteItemButton);
-        VBox pane = new VBox(8, courseHeading, segmentGroup, itemListView, dropHint, buttons);
+        VBox pane = new VBox(8, courseHeading, segmentGroup, sortRow, itemListView, dropHint, buttons);
         pane.getStyleClass().add("lc-inset-pane");
         pane.setPadding(new Insets(10));
         pane.setMinWidth(235);
@@ -281,6 +305,19 @@ public class CourseTabView extends BorderPane {
         this.onStateChanged = listener;
     }
 
+    public void setOnSortOrderChanged(Consumer<CourseSortOrder> listener) {
+        this.onSortOrderChanged = listener;
+    }
+
+    public void setSortOrder(CourseSortOrder order) {
+        if (order == null || order == activeSortOrder) {
+            return;
+        }
+        this.activeSortOrder = order;
+        sortBox.setValue(order);
+        refreshItems();
+    }
+
     public void toggleRail() {
         railVisible = !railVisible;
         if (railVisible) {
@@ -364,7 +401,7 @@ public class CourseTabView extends BorderPane {
             return;
         }
         try {
-            List<CourseItem> items = courseManager.listItems(selectedCourse, selectedSection);
+            List<CourseItem> items = courseManager.listItems(selectedCourse, selectedSection, activeSortOrder);
             CourseItem previous = selectedItem;
             itemListView.getItems().setAll(items);
             if (previous != null && items.contains(previous)) {

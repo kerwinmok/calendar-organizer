@@ -5,16 +5,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
 public class CourseManager {
 
     private final Path coursesRoot;
+    private final AtomicLong lastImportStamp = new AtomicLong(0L);
 
     public CourseManager(Path coursesRoot) {
         this.coursesRoot = coursesRoot.toAbsolutePath().normalize();
@@ -62,6 +65,10 @@ public class CourseManager {
     }
 
     public List<CourseItem> listItems(Course course, CourseSection section) throws IOException {
+        return listItems(course, section, CourseSortOrder.NAME_ASC);
+    }
+
+    public List<CourseItem> listItems(Course course, CourseSection section, CourseSortOrder sortOrder) throws IOException {
         Path sectionDir = course.getDirectory().resolve(section.getFolderName());
         if (!Files.isDirectory(sectionDir)) {
             return List.of();
@@ -73,10 +80,16 @@ public class CourseManager {
                     .filter(p -> !p.getFileName().toString().startsWith("."))
                     .toList();
             for (Path file : files) {
-                items.add(new CourseItem(course, section, file.getFileName().toString(), file));
+                long modifiedMillis = readModifiedMillis(file);
+                items.add(new CourseItem(course, section, file.getFileName().toString(), file, modifiedMillis));
             }
         }
-        items.sort((a, b) -> compareNatural(a.getFileName(), b.getFileName()));
+        CourseSortOrder effectiveOrder = sortOrder;
+        if (effectiveOrder == null) {
+            effectiveOrder = CourseSortOrder.NAME_ASC;
+        }
+        CourseSortOrder orderToUse = effectiveOrder;
+        items.sort((a, b) -> compareItems(a, b, orderToUse));
         return items;
     }
 
@@ -99,7 +112,48 @@ public class CourseManager {
         String safeName = sanitizeAttachmentFileName(rawName);
         Path target = resolveSafeChild(sectionDir, safeName);
         Files.copy(sourceFile, target, StandardCopyOption.REPLACE_EXISTING);
-        return new CourseItem(course, section, safeName, target);
+        long stamp = nextImportTimestamp();
+        Files.setLastModifiedTime(target, FileTime.fromMillis(stamp));
+        return new CourseItem(course, section, safeName, target, stamp);
+    }
+
+    private long nextImportTimestamp() {
+        long now = System.currentTimeMillis();
+        return lastImportStamp.updateAndGet(prev -> {
+            if (now > prev) {
+                return now;
+            }
+            return prev + 1L;
+        });
+    }
+
+    private long readModifiedMillis(Path file) {
+        try {
+            return Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException ex) {
+            return 0L;
+        }
+    }
+
+    private int compareItems(CourseItem a, CourseItem b, CourseSortOrder order) {
+        switch (order) {
+            case NAME_DESC:
+                return compareNatural(b.getFileName(), a.getFileName());
+            case NEWEST_FIRST:
+                int newestCmp = Long.compare(b.getLastModifiedMillis(), a.getLastModifiedMillis());
+                if (newestCmp != 0) {
+                    return newestCmp;
+                }
+                return compareNatural(a.getFileName(), b.getFileName());
+            case OLDEST_FIRST:
+                int oldestCmp = Long.compare(a.getLastModifiedMillis(), b.getLastModifiedMillis());
+                if (oldestCmp != 0) {
+                    return oldestCmp;
+                }
+                return compareNatural(a.getFileName(), b.getFileName());
+            default:
+                return compareNatural(a.getFileName(), b.getFileName());
+        }
     }
 
     public CourseItem createItem(Course course,

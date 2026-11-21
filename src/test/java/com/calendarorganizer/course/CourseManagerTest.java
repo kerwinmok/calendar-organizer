@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -128,5 +129,34 @@ class CourseManagerTest {
         Files.writeString(hidden, "hidden");
         assertThrows(IllegalArgumentException.class,
                 () -> manager.importExternalFile(cmpt, CourseSection.LECTURES, hidden));
+    }
+
+    @Test
+    void sortsCourseItemsAlphabeticallyAndByImportTiming(@TempDir Path tempDir) throws IOException {
+        Course cmpt = manager.createCourse("CMPT 201");
+        Path lec1 = tempDir.resolve("lecture-01.pdf");
+        Path lec2 = tempDir.resolve("lecture-02.pdf");
+        Path appendix = tempDir.resolve("appendix.pdf");
+        Files.writeString(lec1, "l1");
+        Files.writeString(lec2, "l2");
+        Files.writeString(appendix, "app");
+        Files.setLastModifiedTime(appendix, FileTime.fromMillis(1_000_000L));
+
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, lec1);
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, lec2);
+        manager.importExternalFile(cmpt, CourseSection.LECTURES, appendix);
+
+        assertEquals(List.of("appendix.pdf", "lecture-01.pdf", "lecture-02.pdf"),
+                manager.listItems(cmpt, CourseSection.LECTURES, CourseSortOrder.NAME_ASC)
+                        .stream().map(CourseItem::getFileName).toList());
+        assertEquals(List.of("lecture-02.pdf", "lecture-01.pdf", "appendix.pdf"),
+                manager.listItems(cmpt, CourseSection.LECTURES, CourseSortOrder.NAME_DESC)
+                        .stream().map(CourseItem::getFileName).toList());
+        assertEquals(List.of("lecture-01.pdf", "lecture-02.pdf", "appendix.pdf"),
+                manager.listItems(cmpt, CourseSection.LECTURES, CourseSortOrder.OLDEST_FIRST)
+                        .stream().map(CourseItem::getFileName).toList());
+        assertEquals(List.of("appendix.pdf", "lecture-02.pdf", "lecture-01.pdf"),
+                manager.listItems(cmpt, CourseSection.LECTURES, CourseSortOrder.NEWEST_FIRST)
+                        .stream().map(CourseItem::getFileName).toList());
     }
 }

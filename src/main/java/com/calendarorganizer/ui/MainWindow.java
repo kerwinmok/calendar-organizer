@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseManager;
+import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.StorageStats;
@@ -58,6 +59,8 @@ public class MainWindow extends BorderPane {
         this.calendarService = calendarService;
         this.calendarTabView = new CalendarTabView(calendarService);
         this.courseTabView = new CourseTabView(courseManager, courseExporter);
+        this.courseTabView.setSortOrder(CourseSortOrder.fromId(calendarService.loadCourseSortOrder()));
+        this.courseTabView.setOnSortOrderChanged(order -> calendarService.saveCourseSortOrder(order.getId()));
         this.activeTheme = UiTheme.fromId(calendarService.loadTheme());
 
         this.calendarCommandBox = buildCalendarCommandBox();
