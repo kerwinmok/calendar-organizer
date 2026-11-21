@@ -3,7 +3,7 @@
 A local-first Windows desktop app in two parts:
 
 1. **Calendar Builder**: Enter plain sentences like `"i work mon-thurs 7-6pm"` or `"i want to work out and study, i'm busy at 8pm for 2 hours, and i want to sleep at 12"`. Fixed blocks, recurring blocks, sleep hours, and workout/study goals are saved locally in SQLite and scheduled deterministically without overlaps. You can also **manually add, edit, and adjust timings like Google Calendar**: click-and-drag (or double-click) any empty slot to create an event, drag existing events up/down to move them, drag an event's bottom edge to resize its duration, double-click any event or recurring rule to edit its details, and hold **`Ctrl + Scroll`** to zoom the calendar grid in and out. Supports importing Google Calendar `.ics` exports (from file or pasted text) and exporting back to `.ics`.
-2. **Course Organizer**: Organizes courses numerically by course number (for example `MATH 99`, `CMPT 201`, `STAT 201`, `CMPT 1000`) with real disk folders (`courses/CMPT-201/lectures/`, `notes/`, `coursework/`). Supports writing markdown notes, **dragging & dropping PowerPoint (`.pptx`/`.ppt`), PDF (`.pdf`), Word (`.docx`), or image files** directly into a course section, sorting files **alphabetically (A-Z / Z-A) or by timing (Newest first / Oldest first)**, **in-app built-in previews** (lazy virtualized PDF page scrolling with `< Prev` / `Next >` navigation, `-` / `+` / `Fit` and `Ctrl + Scroll` zoom, and automatic cache release on tab switch or exit, plus extracted `.pptx` slides + speaker notes + thumbnail, `.docx`/text preview, and image preview), plus one-click **Open File** and **Open Folder** buttons. Exports a single course or all courses into a `.zip` of clean markdown (`README.md`, normalized per-section `.md` files, and `combined.md`) ready to pass to another LLM for studying.
+2. **Course Organizer**: Organizes courses numerically by course number (for example `MATH 99`, `CMPT 201`, `STAT 201`, `CMPT 1000`) with real disk folders (`courses/CMPT-201/lectures/`, `notes/`, `coursework/`). Supports writing markdown notes, **dragging & dropping PowerPoint (`.pptx`/`.ppt`), PDF (`.pdf`), Word (`.docx`), or image files** directly into a course section, sorting files **alphabetically (A-Z / Z-A) or by timing (Newest first / Oldest first)**, **in-app built-in previews** (lazy virtualized PDF page scrolling with `< Prev` / `Next >` navigation, `-` / `+` / `Fit` and `Ctrl + Scroll` zoom, and automatic cache release on tab switch or exit, plus extracted `.pptx` slides + speaker notes + thumbnail, `.docx`/text preview, and image preview), a side-by-side **Render** study view for all supported files in a course or section (with a course/section/file picker, page-by-page lazy rendering, zoom, and a **Full Screen** / `F11` / `Esc` toggle), plus one-click **Open File** and **Open Folder** buttons. Exports a single course or all courses into a `.zip` of clean markdown (`README.md`, normalized per-section `.md` files, and `combined.md`) ready to pass to another LLM for studying.
 
 ## Screenshots
 
@@ -16,7 +16,7 @@ A local-first Windows desktop app in two parts:
 ## UI Themes, AI Settings & Cleanup
 
 Open **Settings** from the top-right bar to:
-- Switch themes live between **Charcoal (Dark)** (default), **Midnight (OLED Dark)**, and **Paper (Light)**.
+- Switch themes live between **System (Auto)** (default, follows Windows light/dark mode automatically), **Charcoal (Dark)**, **Midnight (OLED Dark)**, and **Paper (Light)**; the native Windows title bar updates to match both app dialogs and the active theme.
 - Optionally save a **Gemini API key** (stored locally, masked input) or configure a local **Ollama** host and model without touching terminal environment variables.
 - Inspect live SQLite counts, database disk size, and memory usage.
 - Run **Clear Past Events**, **Clear Scheduled Sessions**, **Optimize & Compact Database** (`VACUUM` + `PRAGMA optimize`), or **Reset All Calendar History & Settings** (which leaves your course folders and saved AI/theme preferences untouched).
@@ -98,3 +98,5 @@ All calendar events, recurring rules, goals, preferences, and course markdown fo
 - `courses\` — plain markdown files organized as `<COURSE>\lectures\`, `notes\`, and `coursework\`
 
 You can override the data folder via `-Dcalendar.organizer.home=...` or `$env:CALENDAR_ORGANIZER_HOME`.
+
+For multi-device sync design options (peer-to-peer Syncthing, cloud drive plain-file folders, Tailscale self-hosted, and hosted backends), see [SYNC_IDEAS.md](SYNC_IDEAS.md).
