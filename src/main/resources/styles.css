@@ -492,7 +492,15 @@
 
 .split-pane > .split-pane-divider {
     -fx-background-color: -lc-divider;
-    -fx-padding: 0 1 0 1;
+    -fx-padding: 0 2 0 2;
+}
+
+.split-pane:vertical > .split-pane-divider {
+    -fx-padding: 2 0 2 0;
+}
+
+.split-pane > .split-pane-divider:hover {
+    -fx-background-color: -lc-field-border;
 }
 
 .scroll-pane {
@@ -767,7 +775,7 @@
 
 .notebook-pill {
     -fx-background-color: -lc-chrome;
-    -fx-text-fill: -lc-muted;
+    -fx-text-fill: -lc-dim;
     -fx-border-color: -lc-field-border;
     -fx-border-width: 1;
     -fx-border-radius: 10;
@@ -789,6 +797,12 @@
     -fx-font-size: 11px;
 }
 
+.theme-paper .notebook-pill-connected {
+    -fx-background-color: #dcf3e4;
+    -fx-text-fill: #1b5e35;
+    -fx-border-color: #7cc496;
+}
+
 .notebook-step-badge {
     -fx-background-color: -lc-active;
     -fx-text-fill: -lc-text;
@@ -797,4 +811,85 @@
     -fx-padding: 2 8 2 8;
     -fx-font-size: 11px;
     -fx-font-weight: bold;
+}
+
+.workspace-toolbar {
+    -fx-background-color: -lc-inset;
+    -fx-border-color: -lc-divider;
+    -fx-border-width: 0 0 1 0;
+}
+
+.workspace-pane {
+    -fx-background-color: -lc-canvas;
+}
+
+.workspace-pane-header {
+    -fx-background-color: -lc-chrome;
+    -fx-border-color: -lc-divider;
+    -fx-border-width: 0 0 1 0;
+}
+
+.workspace-subbar {
+    -fx-background-color: -lc-inset;
+    -fx-border-color: -lc-divider;
+    -fx-border-width: 0 0 1 0;
+}
+
+.workspace-card {
+    -fx-background-color: -lc-inset;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.workspace-editor {
+    -fx-font-family: "Consolas", "Courier New", monospace;
+    -fx-font-size: 13px;
+    -fx-background-color: -lc-grid-bg;
+    -fx-border-color: transparent;
+    -fx-background-radius: 0;
+    -fx-border-radius: 0;
+}
+
+.workspace-editor .content {
+    -fx-background-color: -lc-grid-bg;
+}
+
+.workspace-close-btn {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: -lc-dim;
+    -fx-font-weight: bold;
+    -fx-padding: 2 7 2 7;
+}
+
+.workspace-close-btn:hover {
+    -fx-background-color: -lc-hover;
+    -fx-text-fill: -lc-text;
+}
+
+.workspace-status-banner {
+    -fx-background-color: -lc-chrome;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 5;
+    -fx-background-radius: 5;
+    -fx-padding: 8 10 8 10;
+    -fx-text-fill: -lc-label;
+}
+
+.workspace-error-banner {
+    -fx-background-color: #3d1f23;
+    -fx-border-color: -lc-danger;
+    -fx-border-width: 1;
+    -fx-border-radius: 5;
+    -fx-background-radius: 5;
+    -fx-padding: 8 10 8 10;
+    -fx-text-fill: #f6c7cc;
+}
+
+.theme-paper .workspace-error-banner {
+    -fx-background-color: #fde9eb;
+    -fx-text-fill: #8d1c27;
 }

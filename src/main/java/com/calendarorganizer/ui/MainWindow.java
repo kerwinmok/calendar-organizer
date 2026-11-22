@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.course.Course;
 import com.calendarorganizer.course.CourseExporter;
+import com.calendarorganizer.course.CourseFilePreviewer;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.llm.ParserMode;
@@ -35,12 +36,20 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class MainWindow extends BorderPane {
 
+    private enum ViewMode {
+        CALENDAR,
+        COURSES,
+        WORKSPACE
+    }
+
     private final CalendarService calendarService;
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
     private final GeminiNotebookSyncService notebookSyncService;
     private final CalendarTabView calendarTabView;
     private CourseTabView courseTabView;
+    private StudyWorkspaceView studyWorkspaceView;
+    private CourseFilePreviewer workspacePreviewer;
     private LectureRenderPane lectureRenderPane;
     private final AtomicLong statsRequestSeq = new AtomicLong(0L);
 
@@ -49,8 +58,10 @@ public class MainWindow extends BorderPane {
     private final HBox topBar;
     private final HBox bottomBar;
 
+    private final Button sidebarToggleBtn = new Button("Panel");
     private final Button calendarNavBtn = new Button("Calendar");
     private final Button coursesNavBtn = new Button("Courses");
+    private final Button workspaceNavBtn = new Button("Workspace");
 
     private final TextField sentenceField = new TextField();
     private final ComboBox<ParserMode> parserModeBox = new ComboBox<>();
@@ -74,6 +85,7 @@ public class MainWindow extends BorderPane {
     private final Label weekLabel = new Label();
     private final HBox calendarBottomLeft;
     private final Label coursePathBottomLabel = new Label();
+    private final Label workspaceBottomLabel = new Label("Split workspace · drag dividers, swap pane types, press F11 for Full Screen");
 
     private final Label statusLabel = new Label("Ready.");
     private final Label statsPill = new Label();
@@ -82,9 +94,10 @@ public class MainWindow extends BorderPane {
     private final WindowsThemeDetector themeDetector;
     private volatile boolean systemDarkMode;
     private SettingsDialog openSettingsDialog;
-    private boolean showingCalendar = true;
+    private ViewMode activeMode = ViewMode.CALENDAR;
     private double savedSplitDivider = 0.50;
     private boolean renderFullScreen;
+    private boolean workspaceFullScreen;
     private boolean fullScreenListenerAttached;
 
     public MainWindow(CalendarService calendarService,
@@ -101,6 +114,7 @@ public class MainWindow extends BorderPane {
         this.systemDarkMode = themeDetector.isDarkMode();
         this.themeDetector.start();
 
+        configureNotebookMenu();
         this.calendarCommandBox = buildCalendarCommandBox();
         this.courseCommandBox = buildCourseCommandBox();
         this.calendarActionsBox = buildCalendarActionsBox();
@@ -119,14 +133,57 @@ public class MainWindow extends BorderPane {
         setBottom(bottomBar);
 
         addEventFilter(KeyEvent.KEY_PRESSED, ev -> {
-            if (ev.getCode() == KeyCode.F11 && isRenderPaneOpen()) {
-                setRenderFullScreen(!renderFullScreen);
-                ev.consume();
+            if (ev.getCode() == KeyCode.F11) {
+                if (isRenderPaneOpen()) {
+                    setRenderFullScreen(!renderFullScreen);
+                    ev.consume();
+                } else if (activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
+                    setWorkspaceFullScreen(!workspaceFullScreen);
+                    ev.consume();
+                }
             }
         });
 
         applyTheme(activeTheme);
         switchToCalendar();
+    }
+
+    private StudyWorkspaceView ensureStudyWorkspaceView() {
+        if (studyWorkspaceView == null) {
+            CourseFilePreviewer previewer = ensureSharedPreviewer();
+            String savedLayout = calendarService.loadWorkspaceLayout();
+            StudyWorkspaceView view = new StudyWorkspaceView(
+                    courseManager,
+                    previewer,
+                    calendarService,
+                    notebookSyncService,
+                    savedLayout,
+                    () -> {
+                        if (courseTabView != null) {
+                            return courseTabView.getSelectedCourse();
+                        }
+                        return null;
+                    },
+                    calendarTabView::getCurrentWeekStart,
+                    this::openNotebookConnectDialog,
+                    json -> AppExecutors.ioExecutor().execute(() -> calendarService.saveWorkspaceLayout(json))
+            );
+            view.setActiveTheme(getResolvedTheme());
+            view.setOnFullScreenToggle(this::setWorkspaceFullScreen);
+            view.setOnStatusChanged(this::updateStatus);
+            this.studyWorkspaceView = view;
+        }
+        return studyWorkspaceView;
+    }
+
+    private CourseFilePreviewer ensureSharedPreviewer() {
+        if (courseTabView != null) {
+            return courseTabView.getPreviewer();
+        }
+        if (workspacePreviewer == null) {
+            workspacePreviewer = new CourseFilePreviewer();
+        }
+        return workspacePreviewer;
     }
 
     private CourseTabView ensureCourseTabView() {
@@ -156,21 +213,22 @@ public class MainWindow extends BorderPane {
     }
 
     private HBox buildTopBar() {
-        Button sidebarToggleBtn = new Button("Panel");
         sidebarToggleBtn.setOnAction(e -> {
-            if (showingCalendar) {
+            if (activeMode == ViewMode.CALENDAR) {
                 calendarTabView.toggleInspector();
-            } else if (courseTabView != null) {
+            } else if (activeMode == ViewMode.COURSES && courseTabView != null) {
                 courseTabView.toggleRail();
             }
         });
 
         calendarNavBtn.getStyleClass().add("lc-segment");
         coursesNavBtn.getStyleClass().add("lc-segment");
+        workspaceNavBtn.getStyleClass().add("lc-segment");
         calendarNavBtn.setOnAction(e -> switchToCalendar());
         coursesNavBtn.setOnAction(e -> switchToCourses());
+        workspaceNavBtn.setOnAction(e -> switchToWorkspace());
 
-        HBox navGroup = new HBox(2, calendarNavBtn, coursesNavBtn);
+        HBox navGroup = new HBox(2, calendarNavBtn, coursesNavBtn, workspaceNavBtn);
         navGroup.getStyleClass().add("lc-segment-group");
 
         HBox leftCluster = new HBox(8, sidebarToggleBtn, navGroup);
@@ -184,13 +242,25 @@ public class MainWindow extends BorderPane {
         Button settingsBtn = new Button("Settings");
         settingsBtn.setOnAction(e -> openSettingsDialog());
 
-        HBox rightCluster = new HBox(8, calendarActionsBox, courseActionsBox, settingsBtn);
+        HBox rightCluster = new HBox(8, calendarActionsBox, courseActionsBox, notebookMenuBtn, settingsBtn);
         rightCluster.setAlignment(Pos.CENTER_RIGHT);
 
         HBox topBar = new HBox(10, leftCluster, leftSpacer, calendarCommandBox, courseCommandBox, rightSpacer, rightCluster);
         topBar.getStyleClass().add("lc-topbar");
         topBar.setAlignment(Pos.CENTER_LEFT);
         return topBar;
+    }
+
+    private void configureNotebookMenu() {
+        MenuItem syncCourseItem = new MenuItem("Sync Selected Course to Notebook");
+        syncCourseItem.setOnAction(e -> syncSelectedCourseToNotebook());
+        MenuItem syncSchedItem = new MenuItem("Sync Schedule to Notebook");
+        syncSchedItem.setOnAction(e -> syncScheduleToNotebook());
+        MenuItem syncAllItem = new MenuItem("Sync All Courses + Schedule");
+        syncAllItem.setOnAction(e -> syncAllToNotebook());
+        MenuItem connectNbItem = new MenuItem("Connect Gemini Notebook...");
+        connectNbItem.setOnAction(e -> openNotebookConnectDialog());
+        notebookMenuBtn.getItems().setAll(syncCourseItem, syncSchedItem, syncAllItem, connectNbItem);
     }
 
     private HBox buildCalendarCommandBox() {
@@ -243,15 +313,7 @@ public class MainWindow extends BorderPane {
         exportIcsItem.setOnAction(e -> calendarTabView.exportIcsFile());
         icsMenuBtn.getItems().setAll(importFileItem, pasteIcsItem, exportIcsItem);
 
-        MenuItem syncSchedItem = new MenuItem("Sync Schedule to Notebook");
-        syncSchedItem.setOnAction(e -> syncScheduleToNotebook());
-        MenuItem syncAllItem = new MenuItem("Sync All Courses + Schedule");
-        syncAllItem.setOnAction(e -> syncAllToNotebook());
-        MenuItem connectNbItem = new MenuItem("Connect Gemini Notebook...");
-        connectNbItem.setOnAction(e -> openNotebookConnectDialog());
-        notebookMenuBtn.getItems().setAll(syncSchedItem, syncAllItem, connectNbItem);
-
-        HBox box = new HBox(6, newEventBtn, autoScheduleBtn, icsMenuBtn, notebookMenuBtn);
+        HBox box = new HBox(6, newEventBtn, autoScheduleBtn, icsMenuBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
         return box;
     }
@@ -296,6 +358,7 @@ public class MainWindow extends BorderPane {
 
     private HBox buildBottomBar() {
         coursePathBottomLabel.getStyleClass().add("dim-label");
+        workspaceBottomLabel.getStyleClass().add("dim-label");
         statusLabel.getStyleClass().add("status-label");
         statsPill.getStyleClass().add("stats-pill");
 
@@ -307,6 +370,7 @@ public class MainWindow extends BorderPane {
         HBox bottomBar = new HBox(10,
                 calendarBottomLeft,
                 coursePathBottomLabel,
+                workspaceBottomLabel,
                 spacerLeft,
                 statusLabel,
                 spacerRight,
@@ -317,8 +381,13 @@ public class MainWindow extends BorderPane {
     }
 
     private void switchToCalendar() {
-        showingCalendar = true;
+        exitAnyFullScreen();
+        if (activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
+            studyWorkspaceView.releaseTransientCaches();
+        }
+        activeMode = ViewMode.CALENDAR;
         if (courseTabView != null) {
+            courseTabView.flushPendingEdits();
             courseTabView.releaseTransientCaches(!isRenderPaneOpen());
         }
         mainContentHost.getChildren().setAll(calendarTabView);
@@ -328,13 +397,44 @@ public class MainWindow extends BorderPane {
     }
 
     private void switchToCourses() {
-        showingCalendar = false;
+        exitAnyFullScreen();
+        if (activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
+            studyWorkspaceView.releaseTransientCaches();
+        }
+        activeMode = ViewMode.COURSES;
         CourseTabView view = ensureCourseTabView();
         mainContentHost.getChildren().setAll(view);
         view.ensureActivePreviewLoaded();
         updateModeVisibility();
         statusLabel.setText(view.getLastStatus());
         refreshCourseFooterUi();
+    }
+
+    private void switchToWorkspace() {
+        exitAnyFullScreen();
+        if (courseTabView != null) {
+            courseTabView.flushPendingEdits();
+            courseTabView.releaseTransientCaches(true);
+        }
+        if (isRenderPaneOpen()) {
+            closeRenderPane();
+        }
+        activeMode = ViewMode.WORKSPACE;
+        StudyWorkspaceView view = ensureStudyWorkspaceView();
+        mainContentHost.getChildren().setAll(view);
+        view.onTabActivated();
+        updateModeVisibility();
+        statusLabel.setText("Study Workspace ready.");
+        refreshFooter();
+    }
+
+    private void exitAnyFullScreen() {
+        if (renderFullScreen) {
+            setRenderFullScreen(false);
+        }
+        if (workspaceFullScreen) {
+            setWorkspaceFullScreen(false);
+        }
     }
 
     private boolean isRenderPaneOpen() {
@@ -384,19 +484,32 @@ public class MainWindow extends BorderPane {
         }
     }
 
-    private void setRenderFullScreen(boolean enable) {
-        Stage stage = null;
+    private Stage resolveWindowStage() {
         if (getScene() != null && getScene().getWindow() instanceof Stage) {
-            stage = (Stage) getScene().getWindow();
+            return (Stage) getScene().getWindow();
         }
+        return null;
+    }
+
+    private void attachFullScreenListener(Stage stage) {
         if (stage != null && !fullScreenListenerAttached) {
             fullScreenListenerAttached = true;
             stage.fullScreenProperty().addListener((obs, wasFull, isFull) -> {
-                if (!isFull && renderFullScreen) {
-                    restoreSideBySideFromFullScreen();
+                if (!isFull) {
+                    if (renderFullScreen) {
+                        restoreSideBySideFromFullScreen();
+                    }
+                    if (workspaceFullScreen) {
+                        restoreWorkspaceFromFullScreen();
+                    }
                 }
             });
         }
+    }
+
+    private void setRenderFullScreen(boolean enable) {
+        Stage stage = resolveWindowStage();
+        attachFullScreenListener(stage);
 
         if (enable) {
             if (lectureRenderPane == null || renderFullScreen) {
@@ -436,31 +549,82 @@ public class MainWindow extends BorderPane {
         } else {
             workspaceSplit.getItems().setAll(mainContentHost);
         }
+        Platform.runLater(this::applyNativeTitleBar);
+    }
+
+    private void setWorkspaceFullScreen(boolean enable) {
+        Stage stage = resolveWindowStage();
+        attachFullScreenListener(stage);
+
+        if (enable) {
+            if (studyWorkspaceView == null || activeMode != ViewMode.WORKSPACE || workspaceFullScreen) {
+                return;
+            }
+            workspaceFullScreen = true;
+            studyWorkspaceView.setFullScreenState(true);
+            setTop(null);
+            setBottom(null);
+            if (stage != null) {
+                stage.setFullScreenExitHint("");
+                stage.setFullScreen(true);
+            }
+        } else {
+            if (stage != null && stage.isFullScreen()) {
+                stage.setFullScreen(false);
+            }
+            restoreWorkspaceFromFullScreen();
+        }
+    }
+
+    private void restoreWorkspaceFromFullScreen() {
+        if (!workspaceFullScreen) {
+            return;
+        }
+        workspaceFullScreen = false;
+        setTop(topBar);
+        setBottom(bottomBar);
+        if (studyWorkspaceView != null) {
+            studyWorkspaceView.setFullScreenState(false);
+        }
+        Platform.runLater(this::applyNativeTitleBar);
     }
 
     private void updateModeVisibility() {
         calendarNavBtn.getStyleClass().remove("lc-segment-active");
         coursesNavBtn.getStyleClass().remove("lc-segment-active");
-        if (showingCalendar) {
+        workspaceNavBtn.getStyleClass().remove("lc-segment-active");
+
+        boolean calendarMode = activeMode == ViewMode.CALENDAR;
+        boolean coursesMode = activeMode == ViewMode.COURSES;
+        boolean workspaceMode = activeMode == ViewMode.WORKSPACE;
+
+        if (calendarMode) {
             calendarNavBtn.getStyleClass().add("lc-segment-active");
-        } else {
+        } else if (coursesMode) {
             coursesNavBtn.getStyleClass().add("lc-segment-active");
+        } else {
+            workspaceNavBtn.getStyleClass().add("lc-segment-active");
         }
 
-        calendarCommandBox.setVisible(showingCalendar);
-        calendarCommandBox.setManaged(showingCalendar);
-        calendarActionsBox.setVisible(showingCalendar);
-        calendarActionsBox.setManaged(showingCalendar);
-        calendarBottomLeft.setVisible(showingCalendar);
-        calendarBottomLeft.setManaged(showingCalendar);
+        sidebarToggleBtn.setVisible(!workspaceMode);
+        sidebarToggleBtn.setManaged(!workspaceMode);
 
-        boolean coursesMode = !showingCalendar;
+        calendarCommandBox.setVisible(calendarMode);
+        calendarCommandBox.setManaged(calendarMode);
+        calendarActionsBox.setVisible(calendarMode);
+        calendarActionsBox.setManaged(calendarMode);
+        calendarBottomLeft.setVisible(calendarMode);
+        calendarBottomLeft.setManaged(calendarMode);
+
         courseCommandBox.setVisible(coursesMode);
         courseCommandBox.setManaged(coursesMode);
         courseActionsBox.setVisible(coursesMode);
         courseActionsBox.setManaged(coursesMode);
         coursePathBottomLabel.setVisible(coursesMode);
         coursePathBottomLabel.setManaged(coursesMode);
+
+        workspaceBottomLabel.setVisible(workspaceMode);
+        workspaceBottomLabel.setManaged(workspaceMode);
     }
 
     private void submitSentence() {
@@ -546,6 +710,7 @@ public class MainWindow extends BorderPane {
 
     private void syncSelectedCourseToNotebook() {
         if (courseTabView == null || !courseTabView.hasSelectedCourse()) {
+            updateStatus("Select a course in Courses (or use Sync Course inside a Notebook pane).");
             return;
         }
         Course selected = courseTabView.getSelectedCourse();
@@ -620,6 +785,9 @@ public class MainWindow extends BorderPane {
         if (courseTabView != null) {
             courseTabView.flushPendingEdits();
         }
+        if (studyWorkspaceView != null) {
+            studyWorkspaceView.flushPendingEdits();
+        }
     }
 
     public void shutdown() {
@@ -627,8 +795,14 @@ public class MainWindow extends BorderPane {
         if (lectureRenderPane != null) {
             lectureRenderPane.releaseResources();
         }
+        if (studyWorkspaceView != null) {
+            studyWorkspaceView.shutdown();
+        }
         if (courseTabView != null) {
             courseTabView.shutdownPreviewer();
+        }
+        if (workspacePreviewer != null) {
+            workspacePreviewer.cleanupAllPdfCaches();
         }
         themeDetector.close();
         AppExecutors.shutdown();
@@ -664,6 +838,9 @@ public class MainWindow extends BorderPane {
         calendarTabView.setActiveTheme(resolved);
         if (courseTabView != null) {
             courseTabView.setActiveTheme(resolved);
+        }
+        if (studyWorkspaceView != null) {
+            studyWorkspaceView.setActiveTheme(resolved);
         }
         if (getScene() != null && getScene().getWindow() != null && getScene().getWindow().isShowing()) {
             applyNativeTitleBar();

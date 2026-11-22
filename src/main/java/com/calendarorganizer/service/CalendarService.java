@@ -42,6 +42,7 @@ public class CalendarService {
     private static final String PREF_OLLAMA_HOST = "ollama_host";
     private static final String PREF_OLLAMA_MODEL = "ollama_model";
     private static final String PREF_COURSE_SORT = "course_sort_order";
+    private static final String PREF_WORKSPACE_LAYOUT = "workspace_layout";
 
     private static final Executor HTTP_EXECUTOR = createHttpExecutor();
     private static final Object HTTP_CLIENT_LOCK = new Object();
@@ -367,5 +368,17 @@ public class CalendarService {
 
     public void saveCourseSortOrder(String sortId) {
         repository.savePreference(PREF_COURSE_SORT, sortId);
+    }
+
+    public String loadWorkspaceLayout() {
+        return repository.loadPreference(PREF_WORKSPACE_LAYOUT, "");
+    }
+
+    public void saveWorkspaceLayout(String layoutJson) {
+        if (layoutJson == null || layoutJson.isBlank()) {
+            repository.deletePreference(PREF_WORKSPACE_LAYOUT);
+        } else {
+            repository.savePreference(PREF_WORKSPACE_LAYOUT, layoutJson);
+        }
     }
 }
