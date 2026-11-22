@@ -142,6 +142,10 @@ public class CalendarService {
         return AppExecutors.ioExecutor();
     }
 
+    public static HttpClient sharedHttpClient() {
+        return getOrCreateHttpClient();
+    }
+
     public CalendarService(CalendarRepository repository,
                            ScheduleParserService parserService,
                            ParseResultMapper mapper,
