@@ -33,6 +33,7 @@ Pre-built Windows bundles are published on the [**Releases page**](https://githu
 Open **Settings** from the top-right bar to:
 - Switch themes live between **System (Auto)** (default, follows Windows light/dark mode automatically), **Charcoal (Dark)**, **Midnight (OLED Dark)**, and **Paper (Light)**; the native Windows title bar updates to match both app dialogs and the active theme.
 - Optionally save a **Gemini API key** (stored locally, masked input) or configure a local **Ollama** host and model without touching terminal environment variables.
+- Connect **Gemini Notebook Direct Sync** (`notebook.googleapis.com/v1` via Desktop OAuth 2.0 PKCE) to sync course notes, supported course files (`.pdf`, `.pptx`, `.docx`, images, audio, text), and your weekly schedule directly into your personal Google Gemini Notebooks (also accessible from the Calendar **Notebook** menu and the Courses **Sync Notebook** button, with SHA-256 deduplication so unchanged files are skipped).
 - Inspect live SQLite counts, database disk size, and memory usage.
 - Run **Clear Past Events**, **Clear Scheduled Sessions**, **Optimize & Compact Database** (`VACUUM` + `PRAGMA optimize`), or **Reset All Calendar History & Settings** (which leaves your course folders and saved preferences untouched).
 
@@ -95,6 +96,20 @@ Start Ollama locally, then launch (or set Host/Model in **Settings**):
 $env:OLLAMA_HOST = "http://localhost:11434"
 $env:OLLAMA_MODEL = "llama3.2"
 mvn javafx:run
+```
+
+## Direct Sync with Gemini Notebook (OAuth 2.0)
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Gemini Notebook API** (`notebook.googleapis.com`).
+2. Create an OAuth 2.0 Client ID of type **Desktop app** and download the `client_secret_*.json` file. (Use a personal Google account that has signed into `notebooklm.google.com` at least once.)
+3. In Calendar Organizer, click **Notebook -> Connect Gemini Notebook...** (or open **Settings -> Connect / Configure Notebook...**), import `client_secret_*.json`, and click **Sign in with Google**.
+4. Use **Notebook -> Sync Schedule to Notebook**, **Notebook -> Sync All Courses + Schedule**, or **Sync Notebook** in the Courses tab. Unchanged content is skipped automatically using local SHA-256 hashes.
+
+You can also supply Desktop OAuth credentials via PowerShell environment variables:
+```powershell
+$env:GEMINI_NOTEBOOK_PROJECT_ID = "your-gcp-project-id"
+$env:GEMINI_NOTEBOOK_CLIENT_ID = "your-desktop-client-id.apps.googleusercontent.com"
+$env:GEMINI_NOTEBOOK_CLIENT_SECRET = "optional-client-secret"
 ```
 
 ## Local Data Storage

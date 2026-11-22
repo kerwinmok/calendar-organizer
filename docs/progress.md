@@ -38,6 +38,7 @@
   - LightCraft-inspired single-chrome UI (`MainWindow`, `SettingsDialog` with optional in-app Gemini/Ollama configuration, `UiTheme` with Charcoal/Midnight/Paper themes), static-grid coalesced `WeekGridView`, SQLite WAL + indexes + compaction (`VACUUM` / `PRAGMA optimize`), and one-click reset of calendar history and settings.
   - `CalendarGridMath` and `EventFormValidator` back interactive calendar zooming, drag-to-create/move/resize, manual event editing, recurring rule editing, course sorting (`CourseSortOrder`), and built-in lecture previews (`CourseFilePreviewer`, `PdfRenderService`, `PdfPageCache`, `LectureRenderModel`, `LectureRenderPane` using in-process Apache PDFBox for lazy virtualized PDF page scrolling with zoom, `.pptx`, `.docx`, images, and plain text with automatic cache cleanup on switch/exit).
   - Both `mvn javafx:run` and the standalone `CalendarOrganizer.exe` launch on Windows cleanly.
-  - All 62 JUnit 5 tests pass.
+  - Direct Gemini Notebook sync (`GeminiNotebookOAuth`, `GeminiNotebookClient`, `GeminiNotebookSyncService`, `NotebookConnectDialog`) supports Google Desktop OAuth PKCE (`client_secret_*.json` import, loopback sign-in, token refresh), per-course and schedule markdown sync, binary file upload with SHA-256 deduplication, and packaging with `jdk.httpserver`.
+  - All 70 JUnit 5 tests pass.
 - **What's next**:
   - Ready for everyday use; set `$env:GEMINI_API_KEY` or run local Ollama optionally for LLM sentence parsing.
