@@ -6,6 +6,7 @@ import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.notebook.GeminiNotebookSyncService;
+import com.calendarorganizer.notebook.NotebookMockupPreferences;
 import com.calendarorganizer.notebook.NotebookSyncResult;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
@@ -39,6 +40,7 @@ public class MainWindow extends BorderPane {
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
     private final GeminiNotebookSyncService notebookSyncService;
+    private final NotebookMockupPreferences mockupPreferences;
     private final CalendarTabView calendarTabView;
     private CourseTabView courseTabView;
     private LectureRenderPane lectureRenderPane;
@@ -70,6 +72,7 @@ public class MainWindow extends BorderPane {
     private final Button exportCourseBtn = new Button("Export Course");
     private final Button exportAllBtn = new Button("Export All");
     private final HBox courseActionsBox;
+    private final Button notebookStatusPill = new Button("Connect Notebook");
 
     private final Label weekLabel = new Label();
     private final HBox calendarBottomLeft;
@@ -90,11 +93,13 @@ public class MainWindow extends BorderPane {
     public MainWindow(CalendarService calendarService,
                       CourseManager courseManager,
                       CourseExporter courseExporter,
-                      GeminiNotebookSyncService notebookSyncService) {
+                      GeminiNotebookSyncService notebookSyncService,
+                      NotebookMockupPreferences mockupPreferences) {
         this.calendarService = calendarService;
         this.courseManager = courseManager;
         this.courseExporter = courseExporter;
         this.notebookSyncService = notebookSyncService;
+        this.mockupPreferences = mockupPreferences;
         this.calendarTabView = new CalendarTabView(calendarService);
         this.activeTheme = UiTheme.fromId(calendarService.loadTheme());
         this.themeDetector = new WindowsThemeDetector(this::handleSystemThemeChanged);
@@ -127,6 +132,7 @@ public class MainWindow extends BorderPane {
 
         applyTheme(activeTheme);
         switchToCalendar();
+        refreshNotebookPill();
     }
 
     private CourseTabView ensureCourseTabView() {
@@ -181,10 +187,18 @@ public class MainWindow extends BorderPane {
         Region rightSpacer = new Region();
         HBox.setHgrow(rightSpacer, Priority.ALWAYS);
 
+        notebookStatusPill.setOnAction(e -> {
+            if (notebookSyncService.loadConfig().isSignedIn()) {
+                openNotebookConnectDialog();
+            } else {
+                openDeploymentMockupDialog();
+            }
+        });
+
         Button settingsBtn = new Button("Settings");
         settingsBtn.setOnAction(e -> openSettingsDialog());
 
-        HBox rightCluster = new HBox(8, calendarActionsBox, courseActionsBox, settingsBtn);
+        HBox rightCluster = new HBox(8, calendarActionsBox, courseActionsBox, notebookStatusPill, settingsBtn);
         rightCluster.setAlignment(Pos.CENTER_RIGHT);
 
         HBox topBar = new HBox(10, leftCluster, leftSpacer, calendarCommandBox, courseCommandBox, rightSpacer, rightCluster);
@@ -249,7 +263,9 @@ public class MainWindow extends BorderPane {
         syncAllItem.setOnAction(e -> syncAllToNotebook());
         MenuItem connectNbItem = new MenuItem("Connect Gemini Notebook...");
         connectNbItem.setOnAction(e -> openNotebookConnectDialog());
-        notebookMenuBtn.getItems().setAll(syncSchedItem, syncAllItem, connectNbItem);
+        MenuItem mockupNbItem = new MenuItem("Preview Deploy Login Mockup...");
+        mockupNbItem.setOnAction(e -> openDeploymentMockupDialog());
+        notebookMenuBtn.getItems().setAll(syncSchedItem, syncAllItem, connectNbItem, mockupNbItem);
 
         HBox box = new HBox(6, newEventBtn, autoScheduleBtn, icsMenuBtn, notebookMenuBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
@@ -495,6 +511,48 @@ public class MainWindow extends BorderPane {
             dialog.showAndWait();
         } finally {
             this.openSettingsDialog = null;
+            refreshNotebookPill();
+        }
+    }
+
+    public void showFirstLaunchNotebookPromptIfNeeded() {
+        if (notebookSyncService.loadConfig().isSignedIn()) {
+            refreshNotebookPill();
+            return;
+        }
+        if (mockupPreferences != null && !mockupPreferences.isDemoConnected() && !mockupPreferences.isPromptDismissed()) {
+            openDeploymentMockupDialog();
+        }
+    }
+
+    private void openDeploymentMockupDialog() {
+        if (mockupPreferences == null || getScene() == null) {
+            return;
+        }
+        NotebookDeploymentMockupDialog dialog = new NotebookDeploymentMockupDialog(
+                getScene().getWindow(),
+                mockupPreferences,
+                courseManager,
+                getResolvedTheme()
+        );
+        dialog.showAndWait();
+        refreshNotebookPill();
+        if (mockupPreferences.isDemoConnected()) {
+            updateStatus("Preview: Connected to Gemini Notebook as " + mockupPreferences.getConnectedEmail() + ".");
+        }
+    }
+
+    private void refreshNotebookPill() {
+        notebookStatusPill.getStyleClass().removeAll("notebook-pill", "notebook-pill-connected");
+        if (notebookSyncService.loadConfig().isSignedIn()) {
+            notebookStatusPill.setText("Notebook: Connected");
+            notebookStatusPill.getStyleClass().add("notebook-pill-connected");
+        } else if (mockupPreferences != null && mockupPreferences.isDemoConnected()) {
+            notebookStatusPill.setText("Notebook: Demo");
+            notebookStatusPill.getStyleClass().add("notebook-pill-connected");
+        } else {
+            notebookStatusPill.setText("Connect Notebook");
+            notebookStatusPill.getStyleClass().add("notebook-pill");
         }
     }
 
@@ -505,6 +563,7 @@ public class MainWindow extends BorderPane {
                 getResolvedTheme()
         );
         dialog.showAndWait();
+        refreshNotebookPill();
         if (notebookSyncService.loadConfig().isSignedIn()) {
             updateStatus("Connected to Gemini Notebook.");
         }
@@ -520,6 +579,7 @@ public class MainWindow extends BorderPane {
                 getResolvedTheme()
         );
         dialog.showAndWait();
+        refreshNotebookPill();
         return notebookSyncService.loadConfig().isSignedIn();
     }
 

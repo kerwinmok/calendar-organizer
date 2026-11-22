@@ -3,6 +3,7 @@ package com.calendarorganizer;
 import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.notebook.GeminiNotebookSyncService;
+import com.calendarorganizer.notebook.NotebookMockupPreferences;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.AppPaths;
 import com.calendarorganizer.storage.CalendarRepository;
@@ -32,8 +33,9 @@ public class MainApp extends Application {
         CourseManager courseManager = new CourseManager(paths.getCoursesDir());
         CourseExporter courseExporter = new CourseExporter(courseManager);
         GeminiNotebookSyncService notebookSyncService = new GeminiNotebookSyncService(repository, calendarService, courseManager);
+        NotebookMockupPreferences mockupPreferences = new NotebookMockupPreferences(repository);
 
-        MainWindow root = new MainWindow(calendarService, courseManager, courseExporter, notebookSyncService);
+        MainWindow root = new MainWindow(calendarService, courseManager, courseExporter, notebookSyncService, mockupPreferences);
         this.mainWindow = root;
         Scene scene = new Scene(root, 1240, 780);
         URL cssUrl = MainApp.class.getResource("/styles.css");
@@ -51,6 +53,7 @@ public class MainApp extends Application {
             Platform.runLater(() -> {
                 root.applyNativeTitleBar();
                 stage.setOpacity(1.0);
+                Platform.runLater(root::showFirstLaunchNotebookPromptIfNeeded);
             });
         });
         stage.show();
