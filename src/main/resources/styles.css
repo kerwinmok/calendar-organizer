@@ -756,3 +756,45 @@
     -fx-font-family: "Segoe UI", system-ui, sans-serif;
     -fx-line-spacing: 3px;
 }
+
+.notebook-card {
+    -fx-background-color: -lc-inset;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.notebook-pill {
+    -fx-background-color: -lc-chrome;
+    -fx-text-fill: -lc-muted;
+    -fx-border-color: -lc-field-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-padding: 3 10 3 10;
+    -fx-font-weight: bold;
+    -fx-font-size: 11px;
+}
+
+.notebook-pill-connected {
+    -fx-background-color: #1f5132;
+    -fx-text-fill: #d7f5e1;
+    -fx-border-color: #2f7d4c;
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-padding: 3 10 3 10;
+    -fx-font-weight: bold;
+    -fx-font-size: 11px;
+}
+
+.notebook-step-badge {
+    -fx-background-color: -lc-active;
+    -fx-text-fill: -lc-text;
+    -fx-border-radius: 9;
+    -fx-background-radius: 9;
+    -fx-padding: 2 8 2 8;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+}

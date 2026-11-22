@@ -503,6 +503,10 @@ public class CalendarTabView extends BorderPane {
         refreshView();
     }
 
+    public LocalDate getCurrentWeekStart() {
+        return currentWeekStart;
+    }
+
     public String getWeekRangeLabel() {
         LocalDate weekEnd = currentWeekStart.plusDays(6);
         return currentWeekStart.format(WEEK_RANGE_FMT) + " – " + weekEnd.format(WEEK_RANGE_FMT) + ", " + weekEnd.getYear();

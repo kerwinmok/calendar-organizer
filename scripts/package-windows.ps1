@@ -56,7 +56,7 @@ try {
         --main-class "com.calendarorganizer.Launcher" `
         --app-version $cleanVersion `
         --icon $iconPath `
-        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.unsupported" `
+        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.httpserver,jdk.unsupported" `
         --java-options "-Xms16m" `
         --java-options "-Xmx192m" `
         --java-options "-XX:+UseSerialGC" `
@@ -141,6 +141,7 @@ try {
 
     if ($Install) {
         Stop-Process -Name CalendarOrganizer -Force -ErrorAction SilentlyContinue
+        Wait-Process -Name CalendarOrganizer -Timeout 5 -ErrorAction SilentlyContinue
 
         $installDir = Join-Path $env:LOCALAPPDATA "Programs\CalendarOrganizer"
         if (Test-Path $installDir) {
