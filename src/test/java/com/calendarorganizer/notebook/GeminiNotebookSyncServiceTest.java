@@ -173,6 +173,70 @@ class GeminiNotebookSyncServiceTest {
             NotebookSyncResult schedRepeat = syncService.syncSchedule(weekStart);
             assertEquals(0, schedRepeat.getUploadedCount());
             assertEquals(1, schedRepeat.getSkippedCount());
+            assertEquals("https://notebooklm.google.com/notebook/nb-1", syncService.getCourseNotebookWebUrl(course));
+            assertEquals("https://notebooklm.google.com/notebook/nb-2", syncService.getScheduleNotebookWebUrl());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void migratesPlaintextSqliteSecretsClearsInvalidGrantAndSplitsOversizedMarkdown(@TempDir Path tempDir) throws Exception {
+        DatabaseManager dbManager = new DatabaseManager(tempDir.resolve("calendar.db"));
+        dbManager.initialize();
+        CalendarRepository repository = new CalendarRepository(dbManager);
+        CalendarService calendarService = new CalendarService(repository);
+        CourseManager courseManager = new CourseManager(tempDir.resolve("courses"));
+
+        repository.savePreference(GeminiNotebookSyncService.PREF_PROJECT_ID, "proj-mig");
+        repository.savePreference(GeminiNotebookSyncService.PREF_CLIENT_ID, "cid-mig");
+        repository.savePreference(GeminiNotebookSyncService.PREF_CLIENT_SECRET, "legacy-secret");
+        repository.savePreference(GeminiNotebookSyncService.PREF_ACCESS_TOKEN, "legacy-access");
+        repository.savePreference(GeminiNotebookSyncService.PREF_REFRESH_TOKEN, "legacy-refresh");
+        repository.savePreference(GeminiNotebookSyncService.PREF_TOKEN_EXPIRES_AT, "100");
+
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/token", exchange ->
+                sendJson(exchange, 400, "{\"error\":\"invalid_grant\",\"error_description\":\"Token has been revoked\"}"));
+        server.start();
+
+        SecretStore vault = SecretStore.inMemory();
+        try {
+            HttpClient http = HttpClient.newHttpClient();
+            String base = "http://127.0.0.1:" + server.getAddress().getPort();
+            GeminiNotebookOAuth oauth = new GeminiNotebookOAuth(base + "/auth", base + "/token", () -> http, u -> {});
+            GeminiNotebookClient client = new GeminiNotebookClient(base, () -> http);
+            Clock fixedClock = Clock.fixed(Instant.ofEpochSecond(1_800_000_000L), ZoneOffset.UTC);
+
+            GeminiNotebookSyncService syncService = new GeminiNotebookSyncService(
+                    repository, calendarService, courseManager, oauth, client, vault, fixedClock
+            );
+
+            NotebookConfig migrated = syncService.loadConfig();
+            assertEquals("legacy-secret", migrated.getClientSecret());
+            assertEquals("legacy-access", migrated.getAccessToken());
+            assertEquals("legacy-refresh", migrated.getRefreshToken());
+            assertEquals("", repository.loadPreference(GeminiNotebookSyncService.PREF_CLIENT_SECRET, ""));
+            assertEquals("", repository.loadPreference(GeminiNotebookSyncService.PREF_ACCESS_TOKEN, ""));
+            assertEquals("", repository.loadPreference(GeminiNotebookSyncService.PREF_REFRESH_TOKEN, ""));
+            assertEquals("legacy-secret", vault.get(GeminiNotebookSyncService.PREF_CLIENT_SECRET));
+
+            Course bigCourse = courseManager.createCourse("BIO 101");
+            String bigBlock = "# Biology Notes\n" + ("Line with cell respiration notes.\n".repeat(40));
+            List<String> parts = GeminiNotebookSyncService.splitMarkdownChunks(bigBlock, 1024);
+            assertTrue(parts.size() >= 2);
+            for (String p : parts) {
+                assertTrue(p.getBytes(StandardCharsets.UTF_8).length <= 1024);
+            }
+
+            NotebookException err = org.junit.jupiter.api.Assertions.assertThrows(
+                    NotebookException.class,
+                    () -> syncService.syncCourse(bigCourse)
+            );
+            assertTrue(err.isInvalidGrant());
+            assertEquals("", syncService.loadConfig().getRefreshToken());
+            assertEquals("", syncService.loadConfig().getAccessToken());
+            assertEquals("cid-mig", syncService.loadConfig().getClientId());
         } finally {
             server.stop(0);
         }

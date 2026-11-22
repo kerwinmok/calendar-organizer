@@ -72,6 +72,7 @@ public class GeminiNotebookSyncService {
     private final CourseManager courseManager;
     private final GeminiNotebookOAuth oauth;
     private final GeminiNotebookClient client;
+    private final SecretStore secretStore;
     private final Clock clock;
 
     public GeminiNotebookSyncService(
@@ -79,7 +80,15 @@ public class GeminiNotebookSyncService {
             CalendarService calendarService,
             CourseManager courseManager
     ) {
-        this(repository, calendarService, courseManager, new GeminiNotebookOAuth(), new GeminiNotebookClient(), Clock.systemDefaultZone());
+        this(
+                repository,
+                calendarService,
+                courseManager,
+                new GeminiNotebookOAuth(),
+                new GeminiNotebookClient(),
+                SecretStore.systemDefault(),
+                Clock.systemDefaultZone()
+        );
     }
 
     public GeminiNotebookSyncService(
@@ -90,20 +99,37 @@ public class GeminiNotebookSyncService {
             GeminiNotebookClient client,
             Clock clock
     ) {
+        this(repository, calendarService, courseManager, oauth, client, SecretStore.inMemory(), clock);
+    }
+
+    public GeminiNotebookSyncService(
+            CalendarRepository repository,
+            CalendarService calendarService,
+            CourseManager courseManager,
+            GeminiNotebookOAuth oauth,
+            GeminiNotebookClient client,
+            SecretStore secretStore,
+            Clock clock
+    ) {
         this.repository = repository;
         this.calendarService = calendarService;
         this.courseManager = courseManager;
         this.oauth = oauth;
         this.client = client;
+        if (secretStore == null) {
+            this.secretStore = SecretStore.systemDefault();
+        } else {
+            this.secretStore = secretStore;
+        }
         this.clock = clock;
     }
 
     public NotebookConfig loadConfig() {
         String projectId = resolvePrefOrEnv(PREF_PROJECT_ID, ENV_PROJECT_ID);
         String clientId = resolvePrefOrEnv(PREF_CLIENT_ID, ENV_CLIENT_ID);
-        String clientSecret = resolvePrefOrEnv(PREF_CLIENT_SECRET, ENV_CLIENT_SECRET);
-        String accessToken = resolvePrefOrEnv(PREF_ACCESS_TOKEN, ENV_ACCESS_TOKEN);
-        String refreshToken = repository.loadPreference(PREF_REFRESH_TOKEN, "");
+        String clientSecret = resolveSecretOrMigrate(PREF_CLIENT_SECRET, ENV_CLIENT_SECRET);
+        String accessToken = resolveSecretOrMigrate(PREF_ACCESS_TOKEN, ENV_ACCESS_TOKEN);
+        String refreshToken = resolveSecretOrMigrate(PREF_REFRESH_TOKEN, "");
         long expiresAt = parseLong(repository.loadPreference(PREF_TOKEN_EXPIRES_AT, "0"));
         String accountEmail = repository.loadPreference(PREF_ACCOUNT_EMAIL, "");
         return new NotebookConfig(projectId, clientId, clientSecret, accessToken, refreshToken, expiresAt, accountEmail);
@@ -112,7 +138,7 @@ public class GeminiNotebookSyncService {
     public void saveClientConfig(String projectId, String clientId, String clientSecret) {
         saveOrDeletePref(PREF_PROJECT_ID, projectId);
         saveOrDeletePref(PREF_CLIENT_ID, clientId);
-        saveOrDeletePref(PREF_CLIENT_SECRET, clientSecret);
+        saveOrDeleteSecret(PREF_CLIENT_SECRET, clientSecret);
     }
 
     public NotebookConfig.ClientCredentials importClientSecretJson(Path jsonFile) throws IOException {
@@ -141,6 +167,8 @@ public class GeminiNotebookSyncService {
     }
 
     public void disconnect() {
+        secretStore.delete(PREF_ACCESS_TOKEN);
+        secretStore.delete(PREF_REFRESH_TOKEN);
         repository.deletePreference(PREF_ACCESS_TOKEN);
         repository.deletePreference(PREF_REFRESH_TOKEN);
         repository.deletePreference(PREF_TOKEN_EXPIRES_AT);
@@ -149,10 +177,26 @@ public class GeminiNotebookSyncService {
 
     public void clearAllConfig() {
         disconnect();
+        secretStore.delete(PREF_CLIENT_SECRET);
         repository.deletePreference(PREF_PROJECT_ID);
         repository.deletePreference(PREF_CLIENT_ID);
         repository.deletePreference(PREF_CLIENT_SECRET);
         repository.deletePreference(PREF_SYNC_STATE);
+    }
+
+    public synchronized List<NotebookInfo> listRemoteNotebooks() throws IOException {
+        return executeWithAuth((accessToken, config) -> client.listNotebooks(accessToken, config.getProjectId()));
+    }
+
+    public String getCourseNotebookWebUrl(Course course) {
+        if (course == null) {
+            return "https://notebooklm.google.com/";
+        }
+        return resolveNotebookWebUrl("course:" + course.getFolderName());
+    }
+
+    public String getScheduleNotebookWebUrl() {
+        return resolveNotebookWebUrl("schedule");
     }
 
     public synchronized NotebookSyncResult syncCourse(Course course) throws IOException {
@@ -212,12 +256,7 @@ public class GeminiNotebookSyncService {
         } catch (NotebookException ex) {
             NotebookConfig latest = loadConfig();
             if (ex.getStatusCode() == 401 && !latest.getRefreshToken().isBlank() && latest.hasOAuthClient()) {
-                GeminiNotebookOAuth.OAuthTokens refreshed = oauth.refreshAccessToken(
-                        latest.getClientId(),
-                        latest.getClientSecret(),
-                        latest.getRefreshToken()
-                );
-                saveTokens(refreshed);
+                GeminiNotebookOAuth.OAuthTokens refreshed = refreshAndSaveTokens(latest);
                 return operation.run(refreshed.getAccessToken(), loadConfig());
             }
             throw ex;
@@ -230,18 +269,30 @@ public class GeminiNotebookSyncService {
             return config.getAccessToken();
         }
         if (!config.getRefreshToken().isBlank() && config.hasOAuthClient()) {
-            GeminiNotebookOAuth.OAuthTokens refreshed = oauth.refreshAccessToken(
-                    config.getClientId(),
-                    config.getClientSecret(),
-                    config.getRefreshToken()
-            );
-            saveTokens(refreshed);
+            GeminiNotebookOAuth.OAuthTokens refreshed = refreshAndSaveTokens(config);
             return refreshed.getAccessToken();
         }
         if (!config.getAccessToken().isBlank()) {
             return config.getAccessToken();
         }
         throw new NotebookException(401, "Google OAuth token expired. Please sign in again.");
+    }
+
+    private GeminiNotebookOAuth.OAuthTokens refreshAndSaveTokens(NotebookConfig config) throws IOException {
+        try {
+            GeminiNotebookOAuth.OAuthTokens refreshed = oauth.refreshAccessToken(
+                    config.getClientId(),
+                    config.getClientSecret(),
+                    config.getRefreshToken()
+            );
+            saveTokens(refreshed);
+            return refreshed;
+        } catch (NotebookException ex) {
+            if (ex.isInvalidGrant()) {
+                disconnect();
+            }
+            throw ex;
+        }
     }
 
     private NotebookSyncResult syncCourseWithToken(
@@ -268,22 +319,34 @@ public class GeminiNotebookSyncService {
             if (notesHash.equals(previousHash)) {
                 skipped++;
             } else {
-                String sourceTitle = course.getDisplayName() + " - Notes.md";
+                List<String> chunks = splitMarkdownChunks(combinedNotes, GeminiNotebookClient.MAX_TEXT_SOURCE_BYTES);
+                String revSuffix = "";
                 if (previousHash != null) {
-                    String rev = LocalDateTime.now(clock).format(REVISION_FMT);
-                    sourceTitle = course.getDisplayName() + " - Notes (" + rev + ").md";
+                    revSuffix = " (" + LocalDateTime.now(clock).format(REVISION_FMT) + ")";
                 }
-                client.addTextSource(
-                        accessToken,
-                        config.getProjectId(),
-                        notebook.getName(),
-                        sourceTitle,
-                        "text/markdown",
-                        combinedNotes
-                );
+                for (int i = 0; i < chunks.size(); i++) {
+                    String sourceTitle;
+                    if (chunks.size() == 1) {
+                        sourceTitle = course.getDisplayName() + " - Notes" + revSuffix + ".md";
+                    } else {
+                        sourceTitle = course.getDisplayName() + " - Notes" + revSuffix
+                                + " (Part " + (i + 1) + " of " + chunks.size() + ").md";
+                    }
+                    client.addTextSource(
+                            accessToken,
+                            config.getProjectId(),
+                            notebook.getName(),
+                            sourceTitle,
+                            "text/markdown",
+                            chunks.get(i)
+                    );
+                    uploaded++;
+                }
+                if (chunks.size() > 1) {
+                    warnings.add("Split oversized course notes into " + chunks.size() + " parts to stay under 1 MB API text limit.");
+                }
                 targetState.sourceHashes.put("notes.md", notesHash);
                 saveSyncState(stateMap);
-                uploaded++;
             }
         }
 
@@ -582,14 +645,96 @@ public class GeminiNotebookSyncService {
         repository.savePreference(PREF_SYNC_STATE, GSON.toJson(stateMap));
     }
 
+    private String resolveNotebookWebUrl(String targetKey) {
+        Map<String, TargetSyncState> stateMap = loadSyncState();
+        TargetSyncState state = stateMap.get(targetKey);
+        if (state == null || state.notebookName == null || state.notebookName.isBlank()) {
+            return "https://notebooklm.google.com/";
+        }
+        String name = state.notebookName.trim();
+        if (name.startsWith("notebooks/")) {
+            String id = name.substring("notebooks/".length()).trim();
+            if (!id.isBlank() && !id.contains("/")) {
+                return "https://notebooklm.google.com/notebook/" + id;
+            }
+        }
+        return "https://notebooklm.google.com/";
+    }
+
+    static List<String> splitMarkdownChunks(String text, int maxUtf8Bytes) {
+        List<String> chunks = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return chunks;
+        }
+        int limit = Math.max(1024, maxUtf8Bytes);
+        if (text.getBytes(StandardCharsets.UTF_8).length <= limit) {
+            chunks.add(text);
+            return chunks;
+        }
+        StringBuilder current = new StringBuilder();
+        int currentBytes = 0;
+        String[] lines = text.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (i < lines.length - 1) {
+                line = line + "\n";
+            }
+            int lineBytes = line.getBytes(StandardCharsets.UTF_8).length;
+            if (lineBytes > limit) {
+                if (currentBytes > 0) {
+                    chunks.add(current.toString());
+                    current.setLength(0);
+                    currentBytes = 0;
+                }
+                appendSplitOversizedLine(line, limit, chunks);
+                continue;
+            }
+            if (currentBytes + lineBytes > limit && currentBytes > 0) {
+                chunks.add(current.toString());
+                current.setLength(0);
+                currentBytes = 0;
+            }
+            current.append(line);
+            currentBytes = currentBytes + lineBytes;
+        }
+        if (currentBytes > 0) {
+            chunks.add(current.toString());
+        }
+        return chunks;
+    }
+
+    private static void appendSplitOversizedLine(String line, int limit, List<String> chunks) {
+        StringBuilder part = new StringBuilder();
+        int partBytes = 0;
+        for (int idx = 0; idx < line.length(); idx++) {
+            char ch = line.charAt(idx);
+            String s = Character.toString(ch);
+            if (Character.isHighSurrogate(ch) && idx + 1 < line.length()) {
+                idx++;
+                s = new String(new char[]{ch, line.charAt(idx)});
+            }
+            int charBytes = s.getBytes(StandardCharsets.UTF_8).length;
+            if (partBytes + charBytes > limit && partBytes > 0) {
+                chunks.add(part.toString());
+                part.setLength(0);
+                partBytes = 0;
+            }
+            part.append(s);
+            partBytes = partBytes + charBytes;
+        }
+        if (partBytes > 0) {
+            chunks.add(part.toString());
+        }
+    }
+
     private void saveTokens(GeminiNotebookOAuth.OAuthTokens tokens) {
-        saveOrDeletePref(PREF_ACCESS_TOKEN, tokens.getAccessToken());
+        saveOrDeleteSecret(PREF_ACCESS_TOKEN, tokens.getAccessToken());
         if (!tokens.getRefreshToken().isBlank()) {
-            saveOrDeletePref(PREF_REFRESH_TOKEN, tokens.getRefreshToken());
+            saveOrDeleteSecret(PREF_REFRESH_TOKEN, tokens.getRefreshToken());
         }
         repository.savePreference(PREF_TOKEN_EXPIRES_AT, Long.toString(tokens.getExpiresAtEpochSeconds()));
         if (!tokens.getAccountEmail().isBlank()) {
-            saveOrDeletePref(PREF_ACCOUNT_EMAIL, tokens.getAccountEmail());
+            repository.savePreference(PREF_ACCOUNT_EMAIL, tokens.getAccountEmail());
         }
     }
 
@@ -599,6 +744,36 @@ public class GeminiNotebookSyncService {
         } else {
             repository.savePreference(key, value.trim());
         }
+    }
+
+    private void saveOrDeleteSecret(String key, String value) {
+        repository.deletePreference(key);
+        if (value == null || value.isBlank()) {
+            secretStore.delete(key);
+        } else {
+            secretStore.put(key, value.trim());
+        }
+    }
+
+    private String resolveSecretOrMigrate(String key, String envKey) {
+        String inVault = secretStore.get(key);
+        if (inVault != null && !inVault.isBlank()) {
+            return inVault.trim();
+        }
+        String legacyPlain = repository.loadPreference(key, "");
+        if (legacyPlain != null && !legacyPlain.isBlank()) {
+            String trimmed = legacyPlain.trim();
+            secretStore.put(key, trimmed);
+            repository.deletePreference(key);
+            return trimmed;
+        }
+        if (envKey != null && !envKey.isBlank()) {
+            String envVal = System.getenv(envKey);
+            if (envVal != null && !envVal.isBlank()) {
+                return envVal.trim();
+            }
+        }
+        return "";
     }
 
     private String resolvePrefOrEnv(String prefKey, String envKey) {

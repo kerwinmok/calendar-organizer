@@ -8,11 +8,15 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,6 +30,7 @@ public class GeminiNotebookClient {
 
     public static final String DEFAULT_BASE_URL = "https://notebook.googleapis.com";
     public static final long MAX_UPLOAD_BYTES = 200L * 1024L * 1024L;
+    public static final int MAX_TEXT_SOURCE_BYTES = 900_000;
 
     private static final Gson GSON = new Gson();
 
@@ -127,11 +132,16 @@ public class GeminiNotebookClient {
         String cleanParent = cleanResourcePath(notebookName);
 
         JsonObject textContent = new JsonObject();
-        if (content == null) {
-            textContent.addProperty("content", "");
-        } else {
-            textContent.addProperty("content", content);
+        String safeContent = content;
+        if (safeContent == null) {
+            safeContent = "";
         }
+        int utf8Bytes = safeContent.getBytes(StandardCharsets.UTF_8).length;
+        if (utf8Bytes > MAX_TEXT_SOURCE_BYTES) {
+            throw new NotebookException(413, "TEXT_TOO_LARGE",
+                    "Text source exceeds 900 KB limit for Gemini Notebook text uploads.");
+        }
+        textContent.addProperty("content", safeContent);
 
         JsonObject payload = new JsonObject();
         payload.addProperty("display_name", nonBlankOrDefault(displayName, "Notes.md"));
@@ -220,7 +230,7 @@ public class GeminiNotebookClient {
             int status = response.statusCode();
             String body = response.body();
             if (status < 200 || status >= 300) {
-                throw new NotebookException(status, buildFriendlyHttpError(status, body));
+                throw buildFriendlyHttpException(status, body);
             }
             if (body == null || body.isBlank()) {
                 return new JsonObject();
@@ -232,33 +242,62 @@ public class GeminiNotebookClient {
             return parsed.getAsJsonObject();
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw new NotebookException(0, "Gemini Notebook request was interrupted.", ex);
+            throw new NotebookException(0, "INTERRUPTED", "Gemini Notebook request was interrupted.", ex);
         } catch (NotebookException ex) {
             throw ex;
+        } catch (HttpTimeoutException ex) {
+            throw new NotebookException(0, "TIMEOUT", "Timed out contacting Gemini Notebook API. Check your internet connection.", ex);
+        } catch (UnknownHostException | ConnectException | UnresolvedAddressException ex) {
+            throw new NotebookException(0, "OFFLINE", "Offline or cannot reach notebook.googleapis.com. Check your internet connection.", ex);
         } catch (IOException ex) {
-            throw new NotebookException(0, "Network error calling Gemini Notebook API: " + ex.getMessage(), ex);
+            throw classifyIoException(ex);
         }
     }
 
-    private String buildFriendlyHttpError(int status, String body) {
-        String apiMessage = extractApiErrorMessage(body);
-        String upper = apiMessage.toUpperCase(Locale.ROOT);
-        if (body != null && body.toUpperCase(Locale.ROOT).contains("WORKSPACE_ACCOUNT_NOT_SUPPORTED")) {
-            return "Google Workspace accounts are not yet supported by Gemini Notebook API. Sign in with a personal Google account.";
+    private NotebookException classifyIoException(IOException ex) {
+        Throwable cause = ex.getCause();
+        if (cause instanceof UnknownHostException
+                || cause instanceof ConnectException
+                || cause instanceof UnresolvedAddressException) {
+            return new NotebookException(0, "OFFLINE", "Offline or cannot reach notebook.googleapis.com. Check your internet connection.", ex);
         }
-        if (upper.contains("ACCOUNT_NOT_FOUND") || (status == 404 && upper.contains("NOT FOUND FOR USER"))) {
-            return "Gemini Notebook account not initialized yet. Open notebooklm.google.com in your browser once with this Google account, then try again.";
+        return new NotebookException(0, "NETWORK", "Network error calling Gemini Notebook API: " + ex.getMessage(), ex);
+    }
+
+    private NotebookException buildFriendlyHttpException(int status, String body) {
+        String apiMessage = extractApiErrorMessage(body);
+        String upperMsg = apiMessage.toUpperCase(Locale.ROOT);
+        String upperBody = "";
+        if (body != null) {
+            upperBody = body.toUpperCase(Locale.ROOT);
+        }
+
+        if (upperBody.contains("SERVICE_DISABLED")
+                || upperMsg.contains("HAS NOT BEEN USED IN PROJECT")
+                || upperMsg.contains("API HAS NOT BEEN ENABLED")) {
+            return new NotebookException(status, "SERVICE_DISABLED",
+                    "Gemini Notebook API (notebook.googleapis.com) is not enabled in your Google Cloud project. Enable it in Cloud Console APIs & Services and retry.");
+        }
+        if (upperBody.contains("WORKSPACE_ACCOUNT_NOT_SUPPORTED")) {
+            return new NotebookException(status, "WORKSPACE_ACCOUNT_NOT_SUPPORTED",
+                    "Google Workspace accounts are not yet supported by Gemini Notebook API. Sign in with a personal Google account.");
+        }
+        if (upperMsg.contains("ACCOUNT_NOT_FOUND") || (status == 404 && upperMsg.contains("NOT FOUND FOR USER"))) {
+            return new NotebookException(status, "ACCOUNT_NOT_FOUND",
+                    "Gemini Notebook account not initialized yet. Open notebooklm.google.com in your browser once with this Google account, then try again.");
         }
         if (status == 401) {
-            return "Google OAuth token expired or was revoked. Open Connect Gemini Notebook and sign in again.";
+            return new NotebookException(status, "UNAUTHENTICATED",
+                    "Google OAuth token expired or was revoked. Open Connect Gemini Notebook and sign in again.");
         }
-        if (status == 429) {
-            return "Gemini Notebook upload rate limit reached (max 20/minute). Wait briefly and try again.";
+        if (status == 429 || upperBody.contains("RESOURCE_EXHAUSTED") || upperBody.contains("RATE_LIMIT_EXCEEDED")) {
+            return new NotebookException(429, "RESOURCE_EXHAUSTED",
+                    "Gemini Notebook quota or upload rate limit reached (max 20/minute). Wait briefly and try again.");
         }
         if (!apiMessage.isBlank()) {
-            return "Gemini Notebook API error (" + status + "): " + apiMessage;
+            return new NotebookException(status, "", "Gemini Notebook API error (" + status + "): " + apiMessage);
         }
-        return "Gemini Notebook API failed with HTTP " + status + ".";
+        return new NotebookException(status, "", "Gemini Notebook API failed with HTTP " + status + ".");
     }
 
     private String extractApiErrorMessage(String body) {

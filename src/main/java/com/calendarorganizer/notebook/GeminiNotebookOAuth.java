@@ -9,13 +9,17 @@ import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -221,17 +225,31 @@ public class GeminiNotebookOAuth {
             HttpResponse<String> response = httpSupplier.get().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             int status = response.statusCode();
             if (status < 200 || status >= 300) {
-                throw new NotebookException(status, buildTokenErrorMessage(status, response.body()));
+                throw buildTokenException(status, response.body());
             }
             return parseTokenResponse(response.body());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw new NotebookException(0, "OAuth token request was interrupted.", ex);
+            throw new NotebookException(0, "INTERRUPTED", "OAuth token request was interrupted.", ex);
         } catch (NotebookException ex) {
             throw ex;
+        } catch (HttpTimeoutException ex) {
+            throw new NotebookException(0, "TIMEOUT", "Timed out connecting to Google OAuth. Check your internet connection.", ex);
+        } catch (UnknownHostException | ConnectException | UnresolvedAddressException ex) {
+            throw new NotebookException(0, "OFFLINE", "Offline or unable to reach Google OAuth servers. Check your internet connection.", ex);
         } catch (IOException ex) {
-            throw new NotebookException(0, "OAuth token request failed: " + ex.getMessage(), ex);
+            throw classifyTokenIoException(ex);
         }
+    }
+
+    private NotebookException classifyTokenIoException(IOException ex) {
+        Throwable cause = ex.getCause();
+        if (cause instanceof UnknownHostException
+                || cause instanceof ConnectException
+                || cause instanceof UnresolvedAddressException) {
+            return new NotebookException(0, "OFFLINE", "Offline or unable to reach Google OAuth servers. Check your internet connection.", ex);
+        }
+        return new NotebookException(0, "NETWORK", "OAuth network error: " + ex.getMessage(), ex);
     }
 
     private OAuthTokens parseTokenResponse(String jsonBody) throws NotebookException {
@@ -254,25 +272,40 @@ public class GeminiNotebookOAuth {
         return new OAuthTokens(accessToken, refreshToken, expiresAt, email);
     }
 
-    private String buildTokenErrorMessage(int status, String body) {
+    private NotebookException buildTokenException(int status, String body) {
+        String err = "";
+        String desc = "";
         if (body != null && !body.isBlank()) {
             try {
                 JsonElement el = JsonParser.parseString(body);
                 if (el.isJsonObject()) {
                     JsonObject obj = el.getAsJsonObject();
-                    String desc = readJsonString(obj, "error_description");
-                    String err = readJsonString(obj, "error");
-                    if (!desc.isBlank()) {
-                        return "Google OAuth error (" + status + "): " + desc;
-                    }
-                    if (!err.isBlank()) {
-                        return "Google OAuth error (" + status + "): " + err;
-                    }
+                    desc = readJsonString(obj, "error_description");
+                    err = readJsonString(obj, "error");
                 }
             } catch (RuntimeException ignored) {
             }
         }
-        return "Google OAuth failed with HTTP " + status + ".";
+        String normalizedErr = err.toLowerCase(Locale.ROOT);
+        if ("invalid_grant".equals(normalizedErr)) {
+            return new NotebookException(status, "invalid_grant",
+                    "Google sign-in session expired or was revoked. Open Connect Gemini Notebook and sign in again.");
+        }
+        if ("invalid_client".equals(normalizedErr) || "unauthorized_client".equals(normalizedErr)) {
+            return new NotebookException(status, "invalid_client",
+                    "Google OAuth Client ID or Client Secret was rejected (" + err + "). Re-check or re-import your credentials JSON.");
+        }
+        if (status == 429) {
+            return new NotebookException(status, "rate_limited",
+                    "Google OAuth rate limit reached. Wait a moment and try again.");
+        }
+        if (!desc.isBlank()) {
+            return new NotebookException(status, err, "Google OAuth error (" + status + "): " + desc);
+        }
+        if (!err.isBlank()) {
+            return new NotebookException(status, err, "Google OAuth error (" + status + "): " + err);
+        }
+        return new NotebookException(status, "", "Google OAuth failed with HTTP " + status + ".");
     }
 
     private void handleCallback(

@@ -128,6 +128,10 @@ class GeminiNotebookClientTest {
             String project = exchange.getRequestHeaders().getFirst("x-goog-user-project");
             if ("ws".equals(project)) {
                 sendJson(exchange, 403, "{\"error\":{\"status\":\"PERMISSION_DENIED\",\"message\":\"WORKSPACE_ACCOUNT_NOT_SUPPORTED\"}}");
+            } else if ("disabled".equals(project)) {
+                sendJson(exchange, 403, "{\"error\":{\"status\":\"PERMISSION_DENIED\",\"message\":\"SERVICE_DISABLED: Gemini Notebook API has not been used in project.\"}}");
+            } else if ("quota".equals(project)) {
+                sendJson(exchange, 429, "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"Quota exceeded\"}}");
             } else if ("noacct".equals(project)) {
                 sendJson(exchange, 404, "{\"error\":{\"status\":\"NOT_FOUND\",\"message\":\"Account not found for user\"}}");
             } else {
@@ -147,12 +151,25 @@ class GeminiNotebookClientTest {
             assertEquals(403, wsEx.getStatusCode());
             assertTrue(wsEx.getMessage().contains("personal Google account"));
 
+            NotebookException disabledEx = assertThrows(NotebookException.class, () -> client.listNotebooks("tok", "disabled"));
+            assertEquals(403, disabledEx.getStatusCode());
+            assertTrue(disabledEx.getMessage().contains("not enabled"));
+
+            NotebookException quotaEx = assertThrows(NotebookException.class, () -> client.listNotebooks("tok", "quota"));
+            assertEquals(429, quotaEx.getStatusCode());
+            assertTrue(quotaEx.getMessage().contains("rate limit"));
+
             NotebookException acctEx = assertThrows(NotebookException.class, () -> client.listNotebooks("tok", "noacct"));
             assertEquals(404, acctEx.getStatusCode());
             assertTrue(acctEx.getMessage().contains("notebooklm.google.com"));
 
             NotebookException authEx = assertThrows(NotebookException.class, () -> client.listNotebooks("tok", "expired"));
             assertEquals(401, authEx.getStatusCode());
+
+            String hugeText = "A".repeat(GeminiNotebookClient.MAX_TEXT_SOURCE_BYTES + 128);
+            NotebookException sizeEx = assertThrows(NotebookException.class,
+                    () -> client.addTextSource("tok", "proj", "notebooks/nb-1", "Huge.md", "text/markdown", hugeText));
+            assertEquals(413, sizeEx.getStatusCode());
         } finally {
             server.stop(0);
         }
