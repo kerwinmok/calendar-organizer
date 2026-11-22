@@ -1,9 +1,14 @@
 # calendar-organizer
 
-A local-first Windows desktop app in two parts:
+A local-first Windows desktop app in three parts:
 
 1. **Calendar Builder**: Enter plain sentences like `"i work mon-thurs 7-6pm"` or `"i want to work out and study, i'm busy at 8pm for 2 hours, and i want to sleep at 12"`. Fixed blocks, recurring blocks, sleep hours, and workout/study goals are saved locally in SQLite and scheduled deterministically without overlaps. You can also **manually add, edit, and adjust timings like Google Calendar**: click-and-drag (or double-click) any empty slot to create an event, drag existing events up/down to move them, drag an event's bottom edge to resize its duration, double-click any event or recurring rule to edit its details, and hold **`Ctrl + Scroll`** to zoom the calendar grid in and out. Supports importing Google Calendar `.ics` exports (from file or pasted text) and exporting back to `.ics`.
 2. **Course Organizer**: Organizes courses numerically by course number (for example `MATH 99`, `CMPT 201`, `STAT 201`, `CMPT 1000`) with real disk folders (`courses/CMPT-201/lectures/`, `notes/`, `coursework/`). Supports writing markdown notes, **dragging & dropping PowerPoint (`.pptx`/`.ppt`), PDF (`.pdf`), Word (`.docx`), or image files** directly into a course section, sorting files **alphabetically (A-Z / Z-A) or by timing (Newest first / Oldest first)**, **in-app built-in previews** (lazy virtualized PDF page scrolling with `< Prev` / `Next >` navigation, `-` / `+` / `Fit` and `Ctrl + Scroll` zoom, and automatic cache release on tab switch or exit, plus extracted `.pptx` slides + speaker notes + thumbnail, `.docx`/text preview, and image preview), a side-by-side **Render** study view for all supported files in a course or section (with a course/section/file picker, page-by-page lazy rendering, zoom, and a **Full Screen** / `F11` / `Esc` toggle), plus one-click **Open File** and **Open Folder** buttons. Exports a single course or all courses into a `.zip` of clean markdown (`README.md`, normalized per-section `.md` files, and `combined.md`) ready to pass to another LLM for studying.
+3. **Study Workspace**: Multi-pane split-screen study layout supporting **2 to 4 resizable panes** (**Side by Side**, **Top / Bottom**, or **2x2 Grid**), **`+ Add Pane`**, per-pane type swapping, pane closing (down to 2 panes), **`F11` / `Esc` Full Screen**, and automatic layout/divider persistence in SQLite:
+   - **Lecture Viewer**: embeds the lazy PDF/PPTX/DOCX/image render view per course with zoom and cache release on hide/close/exit.
+   - **Notes Editor**: edit and create `.md` course notes with 1.2s debounced autosave and synchronous flush on close/switch/exit.
+   - **Gemini Notebook**: view connection status, list remote notebooks, run Course/Schedule/All syncs with inline error banners, or open/snap notebooks in your browser.
+   - **External App (JNA Snap-Beside)**: launches OneNote Desktop (`ONENOTE.EXE` / `onenote:`), OneNote Web, Gemini Notebook web, or a custom URL externally and snaps it side-by-side with Calendar Organizer on Windows using Win32 monitor work-area positioning via JNA (`User32`). *(Embedded `javafx-web` `WebView` is intentionally not bundled because testing showed modern OneNote Web renders blank with ~575 MB process working-set RAM and isolates Google/Microsoft browser logins.)*
 
 ## Download & Run (Windows 10/11 — No Java Required)
 
@@ -33,7 +38,7 @@ Pre-built Windows bundles are published on the [**Releases page**](https://githu
 Open **Settings** from the top-right bar to:
 - Switch themes live between **System (Auto)** (default, follows Windows light/dark mode automatically), **Charcoal (Dark)**, **Midnight (OLED Dark)**, and **Paper (Light)**; the native Windows title bar updates to match both app dialogs and the active theme.
 - Optionally save a **Gemini API key** (stored locally, masked input) or configure a local **Ollama** host and model without touching terminal environment variables.
-- Connect **Gemini Notebook Direct Sync** (`notebook.googleapis.com/v1` via Desktop OAuth 2.0 PKCE) to sync course notes, supported course files (`.pdf`, `.pptx`, `.docx`, images, audio, text), and your weekly schedule directly into your personal Google Gemini Notebooks (also accessible from the Calendar **Notebook** menu and the Courses **Sync Notebook** button, with SHA-256 deduplication so unchanged files are skipped).
+- Connect **Gemini Notebook Direct Sync** (`notebook.googleapis.com/v1` via Desktop OAuth 2.0 PKCE) from the top **Notebook** menu (available across **Calendar**, **Courses**, and **Workspace**), the **Courses -> Sync Notebook** button, or a **Gemini Notebook** workspace pane. OAuth client secrets and tokens are stored locally in **Windows Credential Manager**, unchanged files are skipped via SHA-256 hashing, and oversized markdown bundles (>900 KB) are split cleanly.
 - Inspect live SQLite counts, database disk size, and memory usage.
 - Run **Clear Past Events**, **Clear Scheduled Sessions**, **Optimize & Compact Database** (`VACUUM` + `PRAGMA optimize`), or **Reset All Calendar History & Settings** (which leaves your course folders and saved preferences untouched).
 
@@ -101,9 +106,9 @@ mvn javafx:run
 ## Direct Sync with Gemini Notebook (OAuth 2.0)
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Gemini Notebook API** (`notebook.googleapis.com`).
-2. Create an OAuth 2.0 Client ID of type **Desktop app** and download the `client_secret_*.json` file. (Use a personal Google account that has signed into `notebooklm.google.com` at least once.)
-3. In Calendar Organizer, click **Notebook -> Connect Gemini Notebook...** (or open **Settings -> Connect / Configure Notebook...**), import `client_secret_*.json`, and click **Sign in with Google**.
-4. Use **Notebook -> Sync Schedule to Notebook**, **Notebook -> Sync All Courses + Schedule**, or **Sync Notebook** in the Courses tab. Unchanged content is skipped automatically using local SHA-256 hashes.
+2. Create an OAuth 2.0 Client ID of type **Desktop app** and download the `client_secret_*.json` file. (Requires a personal Google account — Google Workspace accounts are rejected by the API — that has signed into `notebooklm.google.com` at least once.)
+3. In Calendar Organizer, click **Notebook -> Connect Gemini Notebook...** (reachable in Calendar, Courses, or Workspace), import `client_secret_*.json`, and click **Sign in with Google**. Your `client_secret`, `access_token`, and `refresh_token` are stored in **Windows Credential Manager**.
+4. Use **Notebook -> Sync Selected Course to Notebook**, **Notebook -> Sync Schedule to Notebook**, **Notebook -> Sync All Courses + Schedule**, or the **Gemini Notebook** workspace pane. Unchanged content is skipped via SHA-256 hashes, markdown bundles over 900 KB are automatically split under the API limit, and offline / auth (`invalid_grant`) / `SERVICE_DISABLED` / rate-limit errors surface directly in the UI.
 
 You can also supply Desktop OAuth credentials via PowerShell environment variables:
 ```powershell
