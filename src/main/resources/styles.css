@@ -687,6 +687,43 @@
     -fx-border-width: 1.5 1.5 1.5 3.5;
 }
 
+.event-stack-block {
+    -fx-background-color: #262b3d;
+    -fx-border-color: #4a5d8a #4a5d8a #4a5d8a -lc-accent;
+}
+
+.theme-paper .event-stack-block {
+    -fx-background-color: #e6edfa;
+    -fx-border-color: #9fb8eb #9fb8eb #9fb8eb -lc-accent;
+}
+
+.event-stack-badge {
+    -fx-background-color: -lc-accent;
+    -fx-text-fill: #ffffff;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-padding: 1 6 1 6;
+    -fx-background-radius: 3;
+}
+
+.cluster-events-list {
+    -fx-background-color: -lc-field;
+    -fx-border-color: -lc-field-border;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-padding: 2;
+}
+
+.cluster-events-list .list-cell {
+    -fx-padding: 4 7 4 7;
+    -fx-font-size: 11.5px;
+}
+
+.cluster-events-list .list-cell:filled:selected {
+    -fx-background-color: -lc-accent;
+    -fx-text-fill: #ffffff;
+}
+
 .event-title {
     -fx-font-weight: bold;
     -fx-font-size: 11.5px;

@@ -39,6 +39,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicLong;
@@ -57,6 +58,8 @@ public class CalendarTabView extends BorderPane {
     private final TextField sleepField = new TextField();
     private final ListView<RecurringRule> rulesList = new ListView<>();
     private final ListView<ScheduleGoal> goalsList = new ListView<>();
+    private final Label clusterHeaderLabel = new Label("");
+    private final ListView<CalendarEvent> clusterEventsList = new ListView<>();
     private final Label selectedTitleLabel = new Label("None selected");
     private final Label selectedTimeLabel = new Label("");
     private final Label selectedMetaLabel = new Label("");
@@ -65,6 +68,8 @@ public class CalendarTabView extends BorderPane {
 
     private LocalDate currentWeekStart;
     private CalendarEvent selectedEvent;
+    private List<CalendarEvent> selectedClusterEvents = List.of();
+    private boolean updatingClusterList;
     private UiTheme activeTheme = UiTheme.CHARCOAL;
     private boolean inspectorVisible = true;
     private String lastStatus = "Ready.";
@@ -76,6 +81,7 @@ public class CalendarTabView extends BorderPane {
         this.currentWeekStart = service.weekStartOf(LocalDate.now());
         this.weekGridView = new WeekGridView();
         this.weekGridView.setOnEventSelected(this::onEventClicked);
+        this.weekGridView.setOnEventGroupSelected(this::onEventGroupClicked);
         this.weekGridView.setOnEventEditRequested(this::handleEditEventOrRule);
         this.weekGridView.setOnEventTimesChanged(this::handleDragUpdateEvent);
         this.weekGridView.setOnSlotCreateRequested(this::openNewEventDialog);
@@ -168,6 +174,44 @@ public class CalendarTabView extends BorderPane {
         TitledPane goalsPane = new TitledPane("Goals", goalsBox);
         goalsPane.setExpanded(true);
 
+        clusterHeaderLabel.getStyleClass().add("caution-label");
+        clusterHeaderLabel.setVisible(false);
+        clusterHeaderLabel.setManaged(false);
+
+        clusterEventsList.getStyleClass().add("cluster-events-list");
+        clusterEventsList.setPrefHeight(135);
+        clusterEventsList.setVisible(false);
+        clusterEventsList.setManaged(false);
+        clusterEventsList.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(CalendarEvent item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                } else {
+                    setText(item.getStartTime().format(TIME_FMT)
+                            + "-" + item.getEndTime().format(TIME_FMT)
+                            + "  " + item.getTitle());
+                }
+            }
+        });
+        clusterEventsList.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            if (updatingClusterList || newVal == null) {
+                return;
+            }
+            selectedEvent = newVal;
+            weekGridView.setSelectedEvent(newVal);
+            updateSelectedPanel();
+        });
+        clusterEventsList.setOnMouseClicked(ev -> {
+            if (ev.getClickCount() == 2) {
+                CalendarEvent chosen = clusterEventsList.getSelectionModel().getSelectedItem();
+                if (chosen != null) {
+                    handleEditEventOrRule(chosen);
+                }
+            }
+        });
+
         selectedTitleLabel.getStyleClass().add("section-heading");
         selectedTitleLabel.setWrapText(true);
         selectedTimeLabel.setWrapText(true);
@@ -193,11 +237,19 @@ public class CalendarTabView extends BorderPane {
             }
         });
         HBox selectedActions = new HBox(6, editEventButton, deleteEventButton);
-        VBox selectedBox = new VBox(6, selectedTitleLabel, selectedTimeLabel, selectedMetaLabel, selectedActions);
+        VBox selectedBox = new VBox(
+                6,
+                clusterHeaderLabel,
+                clusterEventsList,
+                selectedTitleLabel,
+                selectedTimeLabel,
+                selectedMetaLabel,
+                selectedActions
+        );
         TitledPane selectedPane = new TitledPane("Selected Event", selectedBox);
         selectedPane.setExpanded(true);
 
-        VBox sections = new VBox(0, sleepPane, rulesPane, goalsPane, selectedPane);
+        VBox sections = new VBox(0, selectedPane, sleepPane, rulesPane, goalsPane);
         sections.setFillWidth(true);
         VBox.setVgrow(sections, Priority.ALWAYS);
 
@@ -528,6 +580,7 @@ public class CalendarTabView extends BorderPane {
                 if (refreshSeq.get() != seq) {
                     return;
                 }
+                reconcileSelectedCluster(events);
                 weekGridView.setWeekData(targetWeek, events, selectedEvent);
                 rulesList.getItems().setAll(rules);
                 goalsList.getItems().setAll(goals);
@@ -597,15 +650,127 @@ public class CalendarTabView extends BorderPane {
     }
 
     private void onEventClicked(CalendarEvent event) {
+        clearClusterSelection();
         selectedEvent = event;
         weekGridView.setSelectedEvent(event);
         updateSelectedPanel();
+        inspectorScroll.setVvalue(0.0);
+    }
+
+    private void onEventGroupClicked(List<CalendarEvent> group) {
+        if (group == null || group.isEmpty()) {
+            return;
+        }
+        this.selectedClusterEvents = new ArrayList<>(group);
+        CalendarEvent active = null;
+        if (selectedEvent != null) {
+            for (CalendarEvent candidate : selectedClusterEvents) {
+                if (isSameOccurrence(selectedEvent, candidate)) {
+                    active = candidate;
+                    break;
+                }
+            }
+        }
+        if (active == null) {
+            active = selectedClusterEvents.get(0);
+        }
+        this.selectedEvent = active;
+        syncClusterListUi();
+        weekGridView.setSelectedEvent(active);
+        updateSelectedPanel();
+        if (!inspectorVisible) {
+            toggleInspector();
+        }
+        inspectorScroll.setVvalue(0.0);
     }
 
     public void clearSelection() {
+        clearClusterSelection();
         selectedEvent = null;
         weekGridView.setSelectedEvent(null);
         updateSelectedPanel();
+    }
+
+    private void clearClusterSelection() {
+        selectedClusterEvents = List.of();
+        syncClusterListUi();
+    }
+
+    private void reconcileSelectedCluster(List<CalendarEvent> loadedEvents) {
+        if (selectedClusterEvents.isEmpty()) {
+            return;
+        }
+        List<CalendarEvent> refreshed = new ArrayList<>();
+        for (CalendarEvent oldItem : selectedClusterEvents) {
+            for (CalendarEvent candidate : loadedEvents) {
+                if (isSameOccurrence(oldItem, candidate)) {
+                    refreshed.add(candidate);
+                    break;
+                }
+            }
+        }
+        refreshed.sort(Comparator.comparing(CalendarEvent::getStartTime).thenComparing(CalendarEvent::getEndTime));
+        selectedClusterEvents = refreshed;
+
+        if (selectedEvent != null) {
+            CalendarEvent matchedSelected = null;
+            for (CalendarEvent candidate : refreshed) {
+                if (isSameOccurrence(selectedEvent, candidate)) {
+                    matchedSelected = candidate;
+                    break;
+                }
+            }
+            if (matchedSelected != null) {
+                selectedEvent = matchedSelected;
+            } else if (!refreshed.isEmpty()) {
+                selectedEvent = refreshed.get(0);
+            } else {
+                selectedEvent = null;
+            }
+        } else if (!refreshed.isEmpty()) {
+            selectedEvent = refreshed.get(0);
+        }
+
+        if (selectedClusterEvents.size() <= 1) {
+            selectedClusterEvents = List.of();
+        }
+        syncClusterListUi();
+    }
+
+    private void syncClusterListUi() {
+        boolean showCluster = selectedClusterEvents.size() > 1;
+        clusterHeaderLabel.setVisible(showCluster);
+        clusterHeaderLabel.setManaged(showCluster);
+        clusterEventsList.setVisible(showCluster);
+        clusterEventsList.setManaged(showCluster);
+
+        updatingClusterList = true;
+        try {
+            if (showCluster) {
+                clusterHeaderLabel.setText(selectedClusterEvents.size() + " events in this slot");
+                clusterEventsList.getItems().setAll(selectedClusterEvents);
+                if (selectedEvent != null) {
+                    clusterEventsList.getSelectionModel().select(selectedEvent);
+                } else {
+                    clusterEventsList.getSelectionModel().selectFirst();
+                }
+            } else {
+                clusterHeaderLabel.setText("");
+                clusterEventsList.getItems().clear();
+            }
+        } finally {
+            updatingClusterList = false;
+        }
+    }
+
+    private boolean isSameOccurrence(CalendarEvent a, CalendarEvent b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.getId() > 0 && b.getId() > 0) {
+            return a.getId() == b.getId();
+        }
+        return Objects.equals(a.getUid(), b.getUid()) && Objects.equals(a.getStartTime(), b.getStartTime());
     }
 
     private void updateSelectedPanel() {
