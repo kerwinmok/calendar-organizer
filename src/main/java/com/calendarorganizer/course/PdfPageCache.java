@@ -10,7 +10,7 @@ import java.util.Objects;
 
 public class PdfPageCache {
 
-    public static final long DEFAULT_MAX_BYTES = 8L * 1024L * 1024L;
+    public static final long DEFAULT_MAX_BYTES = 16L * 1024L * 1024L;
 
     public static final class PageCacheKey {
         private final Path normalizedPath;
@@ -93,6 +93,38 @@ public class PdfPageCache {
         }
         CacheEntry entry = entries.get(key);
         return entry != null ? entry.image : null;
+    }
+
+    public synchronized WritableImage getClosestForPage(Path filePath,
+                                                      long lastModifiedMillis,
+                                                      int pageIndex,
+                                                      int preferredWidthBucket) {
+        if (filePath == null) {
+            return null;
+        }
+        Path normalized = filePath.toAbsolutePath().normalize();
+        WritableImage bestImage = null;
+        int bestDistance = Integer.MAX_VALUE;
+        int bestBucket = -1;
+
+        for (Map.Entry<PageCacheKey, CacheEntry> entry : entries.entrySet()) {
+            PageCacheKey key = entry.getKey();
+            if (key.getPageIndex() != pageIndex
+                    || key.getLastModifiedMillis() != lastModifiedMillis
+                    || !normalized.equals(key.getNormalizedPath())) {
+                continue;
+            }
+            int bucket = key.getWidthBucket();
+            int distance = Math.abs(bucket - preferredWidthBucket);
+            if (bestImage == null
+                    || distance < bestDistance
+                    || (distance == bestDistance && bucket > bestBucket)) {
+                bestImage = entry.getValue().image;
+                bestDistance = distance;
+                bestBucket = bucket;
+            }
+        }
+        return bestImage;
     }
 
     public synchronized void put(PageCacheKey key, WritableImage image, long byteEstimate) {

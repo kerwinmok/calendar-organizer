@@ -1,5 +1,6 @@
 package com.calendarorganizer.course;
 
+import javafx.scene.image.WritableImage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,6 +18,8 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CourseFilePreviewerTest {
@@ -127,6 +130,33 @@ class CourseFilePreviewerTest {
         BufferedImage page4 = previewer.renderPdfPageImage(multiPdf, 4, 600);
         assertNotNull(page4);
         assertTrue(page4.getWidth() >= 580 && page4.getWidth() <= 620);
+    }
+
+    @Test
+    void usesCoarseWidthBucketsCachesMetadataAndLooksUpCachedFxImages(@TempDir Path tempDir) throws IOException {
+        assertEquals(256, PdfRenderService.toWidthBucket(240));
+        assertEquals(256, PdfRenderService.toWidthBucket(300));
+        assertEquals(512, PdfRenderService.toWidthBucket(500));
+        assertEquals(768, PdfRenderService.toWidthBucket(720));
+        assertEquals(1024, PdfRenderService.toWidthBucket(1200));
+
+        Path pdf = createMultiPageSamplePdf(tempDir.resolve("cached.pdf"), 3);
+        PdfRenderService.PdfMetadata firstMeta = previewer.inspectPdf(pdf);
+        assertTrue(firstMeta.getLastModifiedMillis() > 0L);
+        PdfRenderService.PdfMetadata secondMeta = previewer.inspectPdf(pdf);
+        assertSame(firstMeta, secondMeta);
+
+        long mtime = firstMeta.getLastModifiedMillis();
+        assertNull(previewer.getCachedPdfPageFxImage(pdf, mtime, 0, 500));
+
+        WritableImage rendered = previewer.renderPdfPageFxImage(pdf, 0, 500);
+        assertNotNull(rendered);
+
+        WritableImage exact = previewer.getCachedPdfPageFxImage(pdf, mtime, 0, 480);
+        assertSame(rendered, exact);
+
+        WritableImage closest = previewer.getClosestCachedPdfPageFxImage(pdf, mtime, 0, 768);
+        assertSame(rendered, closest);
     }
 
     private Path createMultiPageSamplePdf(Path target, int pageCount) throws IOException {

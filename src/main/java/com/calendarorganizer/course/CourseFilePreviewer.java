@@ -183,6 +183,20 @@ public class CourseFilePreviewer {
         return pdfRenderService.getCachedFxImage(pdfPath, pageIndex, targetWidthPx);
     }
 
+    public WritableImage getCachedPdfPageFxImage(Path pdfPath,
+                                                 long lastModifiedMillis,
+                                                 int pageIndex,
+                                                 int targetWidthPx) {
+        return pdfRenderService.getCachedFxImage(pdfPath, lastModifiedMillis, pageIndex, targetWidthPx);
+    }
+
+    public WritableImage getClosestCachedPdfPageFxImage(Path pdfPath,
+                                                        long lastModifiedMillis,
+                                                        int pageIndex,
+                                                        int targetWidthPx) {
+        return pdfRenderService.getClosestCachedFxImage(pdfPath, lastModifiedMillis, pageIndex, targetWidthPx);
+    }
+
     public PdfRenderService getPdfRenderService() {
         return pdfRenderService;
     }

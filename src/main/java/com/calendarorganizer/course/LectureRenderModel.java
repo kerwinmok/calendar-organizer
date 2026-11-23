@@ -48,6 +48,7 @@ public final class LectureRenderModel {
         private final double aspectRatio;
         private final String title;
         private final String detailText;
+        private final long fileLastModifiedMillis;
 
         public RenderEntry(CourseItem courseItem,
                            EntryKind entryKind,
@@ -56,6 +57,17 @@ public final class LectureRenderModel {
                            double aspectRatio,
                            String title,
                            String detailText) {
+            this(courseItem, entryKind, indexInFile, totalInFile, aspectRatio, title, detailText, 0L);
+        }
+
+        public RenderEntry(CourseItem courseItem,
+                           EntryKind entryKind,
+                           int indexInFile,
+                           int totalInFile,
+                           double aspectRatio,
+                           String title,
+                           String detailText,
+                           long fileLastModifiedMillis) {
             this.courseItem = courseItem;
             this.entryKind = entryKind;
             this.indexInFile = indexInFile;
@@ -63,6 +75,7 @@ public final class LectureRenderModel {
             this.aspectRatio = aspectRatio;
             this.title = title;
             this.detailText = detailText;
+            this.fileLastModifiedMillis = fileLastModifiedMillis;
         }
 
         public CourseItem getCourseItem() {
@@ -91,6 +104,10 @@ public final class LectureRenderModel {
 
         public String getDetailText() {
             return detailText;
+        }
+
+        public long getFileLastModifiedMillis() {
+            return fileLastModifiedMillis;
         }
     }
 
@@ -253,7 +270,8 @@ public final class LectureRenderModel {
                         total,
                         meta.getAspectRatio(i),
                         item.getFileName() + " — Page " + (i + 1) + " / " + total,
-                        null
+                        null,
+                        meta.getLastModifiedMillis()
                 ));
             }
             return total;

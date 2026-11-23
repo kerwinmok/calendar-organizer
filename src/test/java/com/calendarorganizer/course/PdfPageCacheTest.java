@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class PdfPageCacheTest {
 
@@ -58,5 +59,24 @@ class PdfPageCacheTest {
         cache.clear();
         assertEquals(0, cache.size());
         assertEquals(0L, cache.currentBytes());
+    }
+
+    @Test
+    void returnsClosestCachedWidthAndTieBreaksToLargerBucket() {
+        PdfPageCache cache = new PdfPageCache(4_000L);
+        Path docA = Path.of("slides.pdf");
+        WritableImage img384 = new WritableImage(10, 10);
+        WritableImage img640 = new WritableImage(12, 12);
+
+        cache.put(new PdfPageCache.PageCacheKey(docA, 500L, 2, 384), img384, 500L);
+        cache.put(new PdfPageCache.PageCacheKey(docA, 500L, 2, 640), img640, 500L);
+
+        assertSame(img384, cache.getClosestForPage(docA, 500L, 2, 384));
+        assertSame(img384, cache.getClosestForPage(docA, 500L, 2, 420));
+        assertSame(img640, cache.getClosestForPage(docA, 500L, 2, 512));
+        assertSame(img640, cache.getClosestForPage(docA, 500L, 2, 896));
+        assertNull(cache.getClosestForPage(docA, 501L, 2, 512));
+        assertNull(cache.getClosestForPage(docA, 500L, 3, 512));
+        assertNull(cache.getClosestForPage(null, 500L, 2, 512));
     }
 }

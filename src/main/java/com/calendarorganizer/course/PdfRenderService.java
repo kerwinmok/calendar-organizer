@@ -27,14 +27,24 @@ public class PdfRenderService implements AutoCloseable {
     public static final class PdfMetadata {
         private final int pageCount;
         private final double[] aspectRatios;
+        private final long lastModifiedMillis;
 
         public PdfMetadata(int pageCount, double[] aspectRatios) {
+            this(pageCount, aspectRatios, 0L);
+        }
+
+        public PdfMetadata(int pageCount, double[] aspectRatios, long lastModifiedMillis) {
             this.pageCount = pageCount;
             this.aspectRatios = aspectRatios;
+            this.lastModifiedMillis = lastModifiedMillis;
         }
 
         public int getPageCount() {
             return pageCount;
+        }
+
+        public long getLastModifiedMillis() {
+            return lastModifiedMillis;
         }
 
         public double getAspectRatio(int pageIndex) {
@@ -74,14 +84,23 @@ public class PdfRenderService implements AutoCloseable {
         }
     }
 
-    private static final int MAX_OPEN_DOCS = 1;
+    private static final int MAX_OPEN_DOCS = 2;
     private static final int MIN_WIDTH_PX = 240;
-    private static final int MAX_WIDTH_PX = 1200;
-    private static final long MAX_RENDER_PIXELS = 1_600_000L;
+    private static final int MAX_WIDTH_PX = 1024;
+    private static final long MAX_RENDER_PIXELS = 950_000L;
+    private static final long MAX_PDF_STREAM_MEMORY_BYTES = 4L * 1024L * 1024L;
+    private static final int MAX_METADATA_CACHE_ENTRIES = 64;
 
     private final PdfPageCache pageCache;
     private final Object docsLock = new Object();
+    private final Object metadataLock = new Object();
     private final Map<Path, PdfDocHandle> openDocs = new LinkedHashMap<>(4, 0.75f, true);
+    private final Map<Path, PdfMetadata> metadataCache = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Path, PdfMetadata> eldest) {
+            return size() > MAX_METADATA_CACHE_ENTRIES;
+        }
+    };
 
     public PdfRenderService() {
         this(new PdfPageCache());
@@ -95,18 +114,33 @@ public class PdfRenderService implements AutoCloseable {
         Path normalized = validatePdfPath(pdfPath);
         long mtime = readModifiedMillis(normalized);
 
+        synchronized (metadataLock) {
+            PdfMetadata cachedMeta = metadataCache.get(normalized);
+            if (cachedMeta != null && cachedMeta.getLastModifiedMillis() == mtime) {
+                return cachedMeta;
+            }
+        }
+
+        PdfMetadata extracted = null;
         PdfDocHandle cached = peekOpenHandle(normalized, mtime);
         if (cached != null) {
             synchronized (cached.renderLock) {
                 if (!cached.closed) {
-                    return extractMetadata(cached.document);
+                    extracted = extractMetadata(cached.document, mtime);
                 }
             }
         }
 
-        try (PDDocument doc = loadDocument(normalized)) {
-            return extractMetadata(doc);
+        if (extracted == null) {
+            try (PDDocument doc = loadDocument(normalized)) {
+                extracted = extractMetadata(doc, mtime);
+            }
         }
+
+        synchronized (metadataLock) {
+            metadataCache.put(normalized, extracted);
+        }
+        return extracted;
     }
 
     public BufferedImage renderPageImage(Path pdfPath, int pageIndex, int targetWidthPx) throws IOException {
@@ -134,6 +168,32 @@ public class PdfRenderService implements AutoCloseable {
         long mtime = readModifiedMillis(normalized);
         int bucket = toWidthBucket(targetWidthPx);
         return pageCache.get(new PdfPageCache.PageCacheKey(normalized, mtime, Math.max(0, pageIndex), bucket));
+    }
+
+    public WritableImage getCachedFxImage(Path pdfPath, long lastModifiedMillis, int pageIndex, int targetWidthPx) {
+        if (pdfPath == null) {
+            return null;
+        }
+        Path normalized = pdfPath.toAbsolutePath().normalize();
+        long effectiveMtime = lastModifiedMillis;
+        if (effectiveMtime <= 0L) {
+            effectiveMtime = readModifiedMillis(normalized);
+        }
+        int bucket = toWidthBucket(targetWidthPx);
+        return pageCache.get(new PdfPageCache.PageCacheKey(normalized, effectiveMtime, Math.max(0, pageIndex), bucket));
+    }
+
+    public WritableImage getClosestCachedFxImage(Path pdfPath, long lastModifiedMillis, int pageIndex, int targetWidthPx) {
+        if (pdfPath == null) {
+            return null;
+        }
+        Path normalized = pdfPath.toAbsolutePath().normalize();
+        long effectiveMtime = lastModifiedMillis;
+        if (effectiveMtime <= 0L) {
+            effectiveMtime = readModifiedMillis(normalized);
+        }
+        int bucket = toWidthBucket(targetWidthPx);
+        return pageCache.getClosestForPage(normalized, effectiveMtime, Math.max(0, pageIndex), bucket);
     }
 
     public WritableImage renderPageFxImage(Path pdfPath, int pageIndex, int targetWidthPx) throws IOException {
@@ -178,6 +238,9 @@ public class PdfRenderService implements AutoCloseable {
             return;
         }
         Path normalized = pdfPath.toAbsolutePath().normalize();
+        synchronized (metadataLock) {
+            metadataCache.remove(normalized);
+        }
         pageCache.evictFile(normalized);
         PdfDocHandle removed;
         synchronized (docsLock) {
@@ -205,6 +268,9 @@ public class PdfRenderService implements AutoCloseable {
 
     @Override
     public void close() {
+        synchronized (metadataLock) {
+            metadataCache.clear();
+        }
         closeAllDocuments();
         clearCache();
     }
@@ -234,7 +300,7 @@ public class PdfRenderService implements AutoCloseable {
         return handle.renderer.renderImage(safePage, scale, ImageType.RGB);
     }
 
-    private PdfMetadata extractMetadata(PDDocument doc) throws IOException {
+    private PdfMetadata extractMetadata(PDDocument doc, long lastModifiedMillis) throws IOException {
         int count = doc.getNumberOfPages();
         if (count <= 0) {
             throw new IOException("PDF has no pages.");
@@ -245,7 +311,7 @@ public class PdfRenderService implements AutoCloseable {
             double ratio = size.heightPt / size.widthPt;
             ratios[i] = Math.max(0.35, Math.min(3.0, ratio));
         }
-        return new PdfMetadata(count, ratios);
+        return new PdfMetadata(count, ratios, lastModifiedMillis);
     }
 
     private PageSize readPageSize(PDPage page) {
@@ -352,7 +418,7 @@ public class PdfRenderService implements AutoCloseable {
     private PDDocument loadDocument(Path normalized) throws IOException {
         return Loader.loadPDF(
                 normalized.toFile(),
-                MemoryUsageSetting.setupTempFileOnly().streamCache
+                MemoryUsageSetting.setupMixed(MAX_PDF_STREAM_MEMORY_BYTES).streamCache
         );
     }
 
@@ -381,8 +447,14 @@ public class PdfRenderService implements AutoCloseable {
 
     public static int toWidthBucket(int targetWidthPx) {
         int clamped = Math.max(MIN_WIDTH_PX, Math.min(MAX_WIDTH_PX, targetWidthPx));
-        int bucket = ((clamped + 31) / 64) * 64;
-        return Math.max(MIN_WIDTH_PX, Math.min(MAX_WIDTH_PX, bucket));
+        int bucket = ((clamped + 63) / 128) * 128;
+        if (bucket < 256) {
+            bucket = 256;
+        }
+        if (bucket > MAX_WIDTH_PX) {
+            bucket = MAX_WIDTH_PX;
+        }
+        return bucket;
     }
 
     private static final class PageSize {
