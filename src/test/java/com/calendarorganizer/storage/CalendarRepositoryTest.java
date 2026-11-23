@@ -1,7 +1,9 @@
 package com.calendarorganizer.storage;
 
 import com.calendarorganizer.model.CalendarEvent;
+import com.calendarorganizer.model.CalendarLayer;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.GoalType;
 import com.calendarorganizer.model.RecurringRule;
@@ -12,6 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -20,6 +25,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -291,5 +297,110 @@ class CalendarRepositoryTest {
 
         repository.deletePreference("gemini_api_key");
         assertEquals("", repository.loadPreference("gemini_api_key", ""));
+    }
+
+    @Test
+    void seedsAndManagesCalendarLayersColorsNotesAndReassignsOnDelete() {
+        List<CalendarLayer> seeded = repository.findAllCalendars();
+        assertEquals(3, seeded.size());
+        assertEquals("General", seeded.get(0).getName());
+        assertEquals("Work", seeded.get(1).getName());
+        assertEquals("School", seeded.get(2).getName());
+
+        CalendarLayer clubs = repository.createCalendar("Clubs", EventColor.PURPLE);
+        assertTrue(clubs.getId() > 0L);
+        assertEquals(EventColor.PURPLE, clubs.getColor());
+        assertThrows(IllegalArgumentException.class, () -> repository.createCalendar("Clubs", EventColor.RED));
+
+        repository.updateCalendar(clubs.withNameAndColor("Campus Clubs", EventColor.PINK));
+        repository.setOnlyCalendarVisible(clubs.getId());
+        for (CalendarLayer layer : repository.findAllCalendars()) {
+            if (layer.getId() == clubs.getId()) {
+                assertTrue(layer.isVisible());
+                assertEquals("Campus Clubs", layer.getName());
+                assertEquals(EventColor.PINK, layer.getColor());
+            } else {
+                assertFalse(layer.isVisible());
+            }
+        }
+        repository.setAllCalendarsVisible(true);
+
+        CalendarEvent clubEvent = repository.saveEvent(new CalendarEvent(
+                0L,
+                null,
+                "Club Meeting",
+                LocalDateTime.of(2026, 11, 18, 17, 0),
+                LocalDateTime.of(2026, 11, 18, 18, 0),
+                EventCategory.GENERAL,
+                EventSource.MANUAL,
+                "Room 101",
+                clubs.getId(),
+                EventColor.GREEN
+        ));
+        RecurringRule clubRule = repository.saveRecurringRule(new RecurringRule(
+                0L,
+                "Weekly Standup",
+                EnumSet.of(DayOfWeek.FRIDAY),
+                LocalTime.of(16, 0),
+                LocalTime.of(16, 30),
+                EventCategory.GENERAL,
+                null,
+                null,
+                clubs.getId(),
+                EventColor.AMBER,
+                "Discord voice"
+        ));
+
+        CalendarEvent loadedEvent = repository.findAllEvents().get(0);
+        assertEquals(clubs.getId(), loadedEvent.getCalendarId());
+        assertEquals(EventColor.GREEN, loadedEvent.getColor());
+        assertEquals("Room 101", loadedEvent.getNotes());
+
+        RecurringRule loadedRule = repository.findAllRecurringRules().get(0);
+        assertEquals(clubs.getId(), loadedRule.getCalendarId());
+        assertEquals(EventColor.AMBER, loadedRule.getColor());
+        assertEquals("Discord voice", loadedRule.getNotes());
+
+        long generalId = seeded.get(0).getId();
+        repository.deleteCalendarAndReassign(clubs.getId(), generalId);
+        assertEquals(3, repository.findAllCalendars().size());
+        assertEquals(generalId, repository.findAllEvents().get(0).getCalendarId());
+        assertEquals(generalId, repository.findAllRecurringRules().get(0).getCalendarId());
+        assertEquals(clubEvent.getId(), repository.findAllEvents().get(0).getId());
+        assertEquals(clubRule.getId(), repository.findAllRecurringRules().get(0).getId());
+    }
+
+    @Test
+    void migratesLegacyDatabaseWithoutCalendarIdOrColorColumns(@TempDir Path tempDir) throws Exception {
+        Path legacyDbPath = tempDir.resolve("legacy.db");
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + legacyDbPath.toAbsolutePath());
+             Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(
+                    "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE NOT NULL, "
+                            + "title TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, "
+                            + "category TEXT NOT NULL, source TEXT NOT NULL, notes TEXT)"
+            );
+            stmt.executeUpdate(
+                    "CREATE TABLE recurring_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
+                            + "days_of_week TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, "
+                            + "category TEXT NOT NULL, start_date TEXT, end_date TEXT)"
+            );
+            stmt.executeUpdate(
+                    "INSERT INTO events (uid, title, start_time, end_time, category, source, notes) "
+                            + "VALUES ('legacy-1', 'Existing Event', '2026-11-18T10:00:00', '2026-11-18T11:00:00', 'BUSY', 'MANUAL', 'Legacy notes')"
+            );
+        }
+
+        DatabaseManager db = new DatabaseManager(legacyDbPath);
+        db.initialize();
+        CalendarRepository migratedRepo = new CalendarRepository(db);
+
+        assertEquals(3, migratedRepo.findAllCalendars().size());
+        List<CalendarEvent> loaded = migratedRepo.findAllEvents();
+        assertEquals(1, loaded.size());
+        assertEquals("Existing Event", loaded.get(0).getTitle());
+        assertEquals("Legacy notes", loaded.get(0).getNotes());
+        assertEquals(1L, loaded.get(0).getCalendarId());
+        assertEquals(EventColor.DEFAULT, loaded.get(0).getColor());
     }
 }

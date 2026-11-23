@@ -7,7 +7,9 @@ import com.calendarorganizer.llm.OllamaProvider;
 import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.llm.ScheduleParserService;
 import com.calendarorganizer.model.CalendarEvent;
+import com.calendarorganizer.model.CalendarLayer;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.RecurringRule;
 import com.calendarorganizer.parser.ParseResultMapper;
@@ -35,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CalendarServiceTest {
@@ -65,44 +67,47 @@ class CalendarServiceTest {
     }
 
     @Test
-    void appliesSentencesAutoSchedulesAndRoundTripsIcs(@TempDir Path tempDir) throws IOException {
-        ApplySentenceResult workRes = service.applySentence("i work mon-thurs 7-6pm", MONDAY, ParserMode.RULES);
+    void appliesSentencesCreatesEventsInLayersAndRoundTripsIcs(@TempDir Path tempDir) throws IOException {
+        List<CalendarLayer> layers = service.findAllCalendars();
+        long workId = layers.get(1).getId();
+        long schoolId = layers.get(2).getId();
+
+        ApplySentenceResult workRes = service.applySentence("i work mon-thurs 7-6pm", MONDAY, ParserMode.RULES, workId);
         assertEquals(1, workRes.getAddedRules());
+        assertEquals(0, workRes.getUpdatedGoals());
+        assertNull(workRes.getScheduleResult());
 
-        ApplySentenceResult goalsRes = service.applySentence(
-                "i want to work out and study, i'm busy at 8pm for 2 hours, and i want to sleep at 12",
+        ApplySentenceResult schoolRes = service.applySentence(
+                "i'm busy at 8pm for 2 hours",
                 MONDAY,
-                ParserMode.RULES
+                ParserMode.RULES,
+                schoolId
         );
-        assertEquals(1, goalsRes.getAddedEvents());
-        assertEquals(2, goalsRes.getUpdatedGoals());
-        assertTrue(goalsRes.isUpdatedSleep());
-        assertNotNull(goalsRes.getScheduleResult());
-        assertEquals(LocalTime.MIDNIGHT, service.loadPreferences().getSleepTime());
+        assertEquals(1, schoolRes.getAddedEvents());
+        assertEquals(0, schoolRes.getUpdatedGoals());
+        assertFalse(schoolRes.isUpdatedSleep());
+        assertNull(schoolRes.getScheduleResult());
 
-        List<CalendarEvent> weekEvents = service.getEventsForWeek(MONDAY);
-        long workCount = weekEvents.stream().filter(e -> e.getCategory() == EventCategory.WORK).count();
-        long busyCount = weekEvents.stream().filter(e -> e.getCategory() == EventCategory.BUSY).count();
-        long workoutCount = weekEvents.stream().filter(e -> e.getCategory() == EventCategory.WORKOUT).count();
-        long studyCount = weekEvents.stream().filter(e -> e.getCategory() == EventCategory.STUDY).count();
+        List<CalendarEvent> allVisible = service.getVisibleEventsForWeek(
+                MONDAY, service.findAllCalendars(), service.findAllRecurringRules()
+        );
+        assertEquals(5, allVisible.size());
 
-        assertEquals(4L, workCount);
-        assertEquals(1L, busyCount);
-        assertEquals(3L, workoutCount);
-        assertTrue(studyCount >= 3L);
+        service.setOnlyCalendarVisible(schoolId);
+        List<CalendarEvent> schoolOnly = service.getVisibleEventsForWeek(
+                MONDAY, service.findAllCalendars(), service.findAllRecurringRules()
+        );
+        assertEquals(1, schoolOnly.size());
+        assertEquals(schoolId, schoolOnly.get(0).getCalendarId());
+
+        service.setAllCalendarsVisible(true);
 
         Path exported = tempDir.resolve("week.ics");
         service.exportIcsFile(exported);
 
-        IcsImportSummary imported = service.importIcsFile(exported);
-        assertTrue(imported.getImportedEvents() >= 5);
+        IcsImportSummary imported = service.importIcsFile(exported, workId);
+        assertEquals(1, imported.getImportedEvents());
         assertEquals(1, imported.getImportedRules());
-
-        service.clearScheduledEvents();
-        long remainingScheduled = service.getEventsForWeek(MONDAY).stream()
-                .filter(e -> e.getSource() == EventSource.SCHEDULED)
-                .count();
-        assertEquals(0L, remainingScheduled);
 
         service.saveTheme("paper");
         assertEquals("paper", service.loadTheme());
@@ -117,7 +122,7 @@ class CalendarServiceTest {
         StorageStats resetStats = service.resetCalendarHistoryAndSettings();
         assertEquals(0, resetStats.getEventCount());
         assertEquals(0, resetStats.getRecurringRuleCount());
-        assertEquals(0, resetStats.getGoalCount());
+        assertEquals(3, service.findAllCalendars().size());
     }
 
     @Test

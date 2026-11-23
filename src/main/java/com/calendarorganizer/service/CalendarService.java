@@ -8,6 +8,8 @@ import com.calendarorganizer.llm.OllamaProvider;
 import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.llm.ScheduleParserService;
 import com.calendarorganizer.model.CalendarEvent;
+import com.calendarorganizer.model.CalendarLayer;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.RecurringRule;
 import com.calendarorganizer.model.ScheduleGoal;
@@ -30,7 +32,9 @@ import java.time.LocalTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -162,37 +166,39 @@ public class CalendarService {
     }
 
     public ApplySentenceResult applySentence(String sentence, LocalDate referenceDate, ParserMode mode) {
+        return applySentence(sentence, referenceDate, mode, 1L);
+    }
+
+    public ApplySentenceResult applySentence(String sentence,
+                                             LocalDate referenceDate,
+                                             ParserMode mode,
+                                             long targetCalendarId) {
+        long safeCalendarId = targetCalendarId;
+        if (safeCalendarId <= 0L) {
+            safeCalendarId = 1L;
+        }
         ParseResult parseResult = parserService.parse(sentence, referenceDate, mode);
-        List<CalendarEvent> events = mapper.toEvents(parseResult, referenceDate);
-        List<RecurringRule> rules = mapper.toRecurringRules(parseResult);
-        List<ScheduleGoal> goals = mapper.toGoals(parseResult);
-
-        repository.saveEvents(events);
-        repository.saveRecurringRules(rules);
-        for (ScheduleGoal goal : goals) {
-            repository.deleteGoalsByType(goal.getType());
-            repository.saveGoal(goal);
+        List<CalendarEvent> mappedEvents = mapper.toEvents(parseResult, referenceDate);
+        List<CalendarEvent> targetedEvents = new ArrayList<>(mappedEvents.size());
+        for (CalendarEvent event : mappedEvents) {
+            targetedEvents.add(event.withCalendarId(safeCalendarId));
+        }
+        List<RecurringRule> mappedRules = mapper.toRecurringRules(parseResult);
+        List<RecurringRule> targetedRules = new ArrayList<>(mappedRules.size());
+        for (RecurringRule rule : mappedRules) {
+            targetedRules.add(rule.withCalendarId(safeCalendarId));
         }
 
-        boolean updatedSleep = false;
-        if (parseResult.getSleepTime() != null) {
-            SchedulePreferences current = repository.loadPreferences();
-            repository.savePreferences(new SchedulePreferences(parseResult.getSleepTime(), current.getSleepDurationHours()));
-            updatedSleep = true;
-        }
-
-        ScheduleResult scheduleResult = null;
-        if (!parseResult.isEmpty() && !repository.findAllGoals().isEmpty()) {
-            scheduleResult = rescheduleWeek(weekStartOf(referenceDate));
-        }
+        repository.saveEvents(targetedEvents);
+        repository.saveRecurringRules(targetedRules);
 
         return new ApplySentenceResult(
                 parseResult,
-                events.size(),
-                rules.size(),
-                goals.size(),
-                updatedSleep,
-                scheduleResult
+                targetedEvents.size(),
+                targetedRules.size(),
+                0,
+                false,
+                null
         );
     }
 
@@ -235,20 +241,65 @@ public class CalendarService {
         return combined;
     }
 
+    public List<CalendarEvent> getVisibleEventsForWeek(LocalDate weekStart,
+                                                       List<CalendarLayer> calendars,
+                                                       List<RecurringRule> preloadedRules) {
+        List<CalendarEvent> all = getEventsForWeek(weekStart, preloadedRules);
+        if (calendars == null || calendars.isEmpty()) {
+            return all;
+        }
+        Set<Long> knownIds = new HashSet<>();
+        Set<Long> visibleIds = new HashSet<>();
+        for (CalendarLayer layer : calendars) {
+            knownIds.add(layer.getId());
+            if (layer.isVisible()) {
+                visibleIds.add(layer.getId());
+            }
+        }
+        List<CalendarEvent> filtered = new ArrayList<>();
+        for (CalendarEvent event : all) {
+            long cid = event.getCalendarId();
+            if (!knownIds.contains(cid) || visibleIds.contains(cid)) {
+                filtered.add(event);
+            }
+        }
+        return filtered;
+    }
+
     public IcsImportSummary importIcsFile(Path file) throws IOException {
+        return importIcsFile(file, 1L);
+    }
+
+    public IcsImportSummary importIcsFile(Path file, long calendarId) throws IOException {
         IcsParseResult parsed = icsParser.parseFile(file);
-        return persistIcsResult(parsed);
+        return persistIcsResult(parsed, calendarId);
     }
 
     public IcsImportSummary importIcsText(String icsText) {
-        IcsParseResult parsed = icsParser.parseText(icsText);
-        return persistIcsResult(parsed);
+        return importIcsText(icsText, 1L);
     }
 
-    private IcsImportSummary persistIcsResult(IcsParseResult parsed) {
-        repository.upsertEventsByUid(parsed.getEvents());
-        repository.saveRecurringRules(parsed.getRecurringRules());
-        return new IcsImportSummary(parsed.getEvents().size(), parsed.getRecurringRules().size(), parsed.getWarnings());
+    public IcsImportSummary importIcsText(String icsText, long calendarId) {
+        IcsParseResult parsed = icsParser.parseText(icsText);
+        return persistIcsResult(parsed, calendarId);
+    }
+
+    private IcsImportSummary persistIcsResult(IcsParseResult parsed, long calendarId) {
+        long safeCalendarId = calendarId;
+        if (safeCalendarId <= 0L) {
+            safeCalendarId = 1L;
+        }
+        List<CalendarEvent> targetedEvents = new ArrayList<>(parsed.getEvents().size());
+        for (CalendarEvent event : parsed.getEvents()) {
+            targetedEvents.add(event.withCalendarId(safeCalendarId));
+        }
+        List<RecurringRule> targetedRules = new ArrayList<>(parsed.getRecurringRules().size());
+        for (RecurringRule rule : parsed.getRecurringRules()) {
+            targetedRules.add(rule.withCalendarId(safeCalendarId));
+        }
+        repository.upsertEventsByUid(targetedEvents);
+        repository.saveRecurringRules(targetedRules);
+        return new IcsImportSummary(targetedEvents.size(), targetedRules.size(), parsed.getWarnings());
     }
 
     public void exportIcsFile(Path targetFile) throws IOException {
@@ -286,12 +337,44 @@ public class CalendarService {
         repository.updateEvent(event);
     }
 
+    public RecurringRule saveRecurringRule(RecurringRule rule) {
+        return repository.saveRecurringRule(rule);
+    }
+
     public void deleteRecurringRule(long id) {
         repository.deleteRecurringRule(id);
     }
 
     public void updateRecurringRule(RecurringRule rule) {
         repository.updateRecurringRule(rule);
+    }
+
+    public List<CalendarLayer> findAllCalendars() {
+        return repository.findAllCalendars();
+    }
+
+    public CalendarLayer createCalendar(String name, EventColor color) {
+        return repository.createCalendar(name, color);
+    }
+
+    public void updateCalendar(CalendarLayer layer) {
+        repository.updateCalendar(layer);
+    }
+
+    public void setCalendarVisible(long id, boolean visible) {
+        repository.setCalendarVisible(id, visible);
+    }
+
+    public void setOnlyCalendarVisible(long id) {
+        repository.setOnlyCalendarVisible(id);
+    }
+
+    public void setAllCalendarsVisible(boolean visible) {
+        repository.setAllCalendarsVisible(visible);
+    }
+
+    public void deleteCalendar(long deleteId, long fallbackCalendarId) {
+        repository.deleteCalendarAndReassign(deleteId, fallbackCalendarId);
     }
 
     public void deleteGoal(long id) {

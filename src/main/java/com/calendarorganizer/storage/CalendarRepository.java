@@ -1,7 +1,9 @@
 package com.calendarorganizer.storage;
 
 import com.calendarorganizer.model.CalendarEvent;
+import com.calendarorganizer.model.CalendarLayer;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.GoalType;
 import com.calendarorganizer.model.RecurringRule;
@@ -72,8 +74,8 @@ public class CalendarRepository {
     }
 
     private CalendarEvent insertEvent(Connection conn, CalendarEvent event) throws SQLException {
-        String sql = "INSERT INTO events (uid, title, start_time, end_time, category, source, notes) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO events (uid, title, start_time, end_time, category, source, notes, calendar_id, color) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, event.getUid());
             ps.setString(2, event.getTitle());
@@ -82,6 +84,8 @@ public class CalendarRepository {
             ps.setString(5, event.getCategory().name());
             ps.setString(6, event.getSource().name());
             ps.setString(7, event.getNotes());
+            ps.setLong(8, event.getCalendarId());
+            ps.setString(9, encodeColor(event.getColor()));
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -148,7 +152,7 @@ public class CalendarRepository {
 
     private void updateExistingEvent(Connection conn, long id, CalendarEvent event) throws SQLException {
         String updateSql = "UPDATE events SET title = ?, start_time = ?, end_time = ?, "
-                + "category = ?, source = ?, notes = ? WHERE id = ?";
+                + "category = ?, source = ?, notes = ?, calendar_id = ?, color = ? WHERE id = ?";
         try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
             ps.setString(1, event.getTitle());
             ps.setString(2, event.getStartTime().format(DT_FORMAT));
@@ -156,13 +160,15 @@ public class CalendarRepository {
             ps.setString(4, event.getCategory().name());
             ps.setString(5, event.getSource().name());
             ps.setString(6, event.getNotes());
-            ps.setLong(7, id);
+            ps.setLong(7, event.getCalendarId());
+            ps.setString(8, encodeColor(event.getColor()));
+            ps.setLong(9, id);
             ps.executeUpdate();
         }
     }
 
     public List<CalendarEvent> findAllEvents() {
-        String sql = "SELECT id, uid, title, start_time, end_time, category, source, notes "
+        String sql = "SELECT id, uid, title, start_time, end_time, category, source, notes, calendar_id, color "
                 + "FROM events ORDER BY start_time ASC, id ASC";
         List<CalendarEvent> results = new ArrayList<>();
         try (Connection conn = dbManager.openConnection();
@@ -178,7 +184,7 @@ public class CalendarRepository {
     }
 
     public List<CalendarEvent> findEventsInRange(LocalDateTime rangeStart, LocalDateTime rangeEnd) {
-        String sql = "SELECT id, uid, title, start_time, end_time, category, source, notes "
+        String sql = "SELECT id, uid, title, start_time, end_time, category, source, notes, calendar_id, color "
                 + "FROM events WHERE start_time < ? AND end_time > ? ORDER BY start_time ASC, id ASC";
         List<CalendarEvent> results = new ArrayList<>();
         try (Connection conn = dbManager.openConnection();
@@ -261,8 +267,8 @@ public class CalendarRepository {
 
     private RecurringRule insertRecurringRule(Connection conn, RecurringRule rule) throws SQLException {
         String sql = "INSERT INTO recurring_rules "
-                + "(title, days_of_week, start_time, end_time, category, start_date, end_date) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+                + "(title, days_of_week, start_time, end_time, category, start_date, end_date, calendar_id, color, notes) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, rule.getTitle());
             ps.setString(2, encodeDays(rule.getDaysOfWeek()));
@@ -279,6 +285,9 @@ public class CalendarRepository {
             } else {
                 ps.setString(7, rule.getEndDate().format(DATE_FORMAT));
             }
+            ps.setLong(8, rule.getCalendarId());
+            ps.setString(9, encodeColor(rule.getColor()));
+            ps.setString(10, rule.getNotes());
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -290,7 +299,8 @@ public class CalendarRepository {
     }
 
     public List<RecurringRule> findAllRecurringRules() {
-        String sql = "SELECT id, title, days_of_week, start_time, end_time, category, start_date, end_date "
+        String sql = "SELECT id, title, days_of_week, start_time, end_time, category, start_date, end_date, "
+                + "calendar_id, color, notes "
                 + "FROM recurring_rules ORDER BY id ASC";
         List<RecurringRule> rules = new ArrayList<>();
         try (Connection conn = dbManager.openConnection();
@@ -321,7 +331,8 @@ public class CalendarRepository {
             throw new IllegalArgumentException("recurring rule id must be positive");
         }
         String sql = "UPDATE recurring_rules SET title = ?, days_of_week = ?, start_time = ?, "
-                + "end_time = ?, category = ?, start_date = ?, end_date = ? WHERE id = ?";
+                + "end_time = ?, category = ?, start_date = ?, end_date = ?, "
+                + "calendar_id = ?, color = ?, notes = ? WHERE id = ?";
         try (Connection conn = dbManager.openConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, rule.getTitle());
@@ -339,11 +350,165 @@ public class CalendarRepository {
             } else {
                 ps.setString(7, rule.getEndDate().format(DATE_FORMAT));
             }
-            ps.setLong(8, rule.getId());
+            ps.setLong(8, rule.getCalendarId());
+            ps.setString(9, encodeColor(rule.getColor()));
+            ps.setString(10, rule.getNotes());
+            ps.setLong(11, rule.getId());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("failed to update recurring rule", e);
         }
+    }
+
+    public List<CalendarLayer> findAllCalendars() {
+        String sql = "SELECT id, name, color, visible FROM calendars ORDER BY id ASC";
+        List<CalendarLayer> layers = new ArrayList<>();
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                layers.add(new CalendarLayer(
+                        rs.getLong("id"),
+                        rs.getString("name"),
+                        EventColor.fromId(rs.getString("color")),
+                        rs.getInt("visible") != 0
+                ));
+            }
+            return layers;
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to load calendars", e);
+        }
+    }
+
+    public CalendarLayer createCalendar(String name, EventColor color) {
+        CalendarLayer validated = new CalendarLayer(0L, name, color, true);
+        String sql = "INSERT INTO calendars (name, color, visible) VALUES (?, ?, 1)";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, validated.getName());
+            ps.setString(2, validated.getColor().name());
+            ps.executeUpdate();
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                if (keys.next()) {
+                    return validated.withId(keys.getLong(1));
+                }
+            }
+            return validated;
+        } catch (SQLException e) {
+            if (isUniqueConstraintViolation(e)) {
+                throw new IllegalArgumentException("A calendar named '" + validated.getName() + "' already exists.");
+            }
+            throw new IllegalStateException("failed to create calendar", e);
+        }
+    }
+
+    public void updateCalendar(CalendarLayer layer) {
+        if (layer == null || layer.getId() <= 0L) {
+            throw new IllegalArgumentException("calendar id must be positive");
+        }
+        String sql = "UPDATE calendars SET name = ?, color = ?, visible = ? WHERE id = ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, layer.getName());
+            ps.setString(2, layer.getColor().name());
+            if (layer.isVisible()) {
+                ps.setInt(3, 1);
+            } else {
+                ps.setInt(3, 0);
+            }
+            ps.setLong(4, layer.getId());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            if (isUniqueConstraintViolation(e)) {
+                throw new IllegalArgumentException("A calendar named '" + layer.getName() + "' already exists.");
+            }
+            throw new IllegalStateException("failed to update calendar", e);
+        }
+    }
+
+    public void setCalendarVisible(long id, boolean visible) {
+        String sql = "UPDATE calendars SET visible = ? WHERE id = ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (visible) {
+                ps.setInt(1, 1);
+            } else {
+                ps.setInt(1, 0);
+            }
+            ps.setLong(2, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to toggle calendar visibility", e);
+        }
+    }
+
+    public void setOnlyCalendarVisible(long id) {
+        String sql = "UPDATE calendars SET visible = CASE WHEN id = ? THEN 1 ELSE 0 END";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to isolate calendar visibility", e);
+        }
+    }
+
+    public void setAllCalendarsVisible(boolean visible) {
+        String sql = "UPDATE calendars SET visible = ?";
+        try (Connection conn = dbManager.openConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (visible) {
+                ps.setInt(1, 1);
+            } else {
+                ps.setInt(1, 0);
+            }
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to update all calendar visibilities", e);
+        }
+    }
+
+    public void deleteCalendarAndReassign(long deleteId, long fallbackCalendarId) {
+        if (deleteId <= 0L || fallbackCalendarId <= 0L || deleteId == fallbackCalendarId) {
+            throw new IllegalArgumentException("Choose a different calendar for reassignment.");
+        }
+        try (Connection conn = dbManager.openConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement evPs = conn.prepareStatement("UPDATE events SET calendar_id = ? WHERE calendar_id = ?")) {
+                    evPs.setLong(1, fallbackCalendarId);
+                    evPs.setLong(2, deleteId);
+                    evPs.executeUpdate();
+                }
+                try (PreparedStatement rulePs = conn.prepareStatement("UPDATE recurring_rules SET calendar_id = ? WHERE calendar_id = ?")) {
+                    rulePs.setLong(1, fallbackCalendarId);
+                    rulePs.setLong(2, deleteId);
+                    rulePs.executeUpdate();
+                }
+                try (PreparedStatement delPs = conn.prepareStatement("DELETE FROM calendars WHERE id = ?")) {
+                    delPs.setLong(1, deleteId);
+                    delPs.executeUpdate();
+                }
+                conn.commit();
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("failed to delete calendar", e);
+        }
+    }
+
+    private boolean isUniqueConstraintViolation(SQLException ex) {
+        String msg = ex.getMessage();
+        return msg != null && msg.contains("UNIQUE");
+    }
+
+    private String encodeColor(EventColor color) {
+        if (color == null || color == EventColor.DEFAULT) {
+            return "";
+        }
+        return color.name();
     }
 
     public ScheduleGoal saveGoal(ScheduleGoal goal) {
@@ -601,7 +766,9 @@ public class CalendarRepository {
                 LocalDateTime.parse(rs.getString("end_time"), DT_FORMAT),
                 EventCategory.valueOf(rs.getString("category")),
                 EventSource.valueOf(rs.getString("source")),
-                rs.getString("notes")
+                rs.getString("notes"),
+                rs.getLong("calendar_id"),
+                EventColor.fromId(rs.getString("color"))
         );
     }
 
@@ -624,7 +791,10 @@ public class CalendarRepository {
                 LocalTime.parse(rs.getString("end_time"), TIME_FORMAT),
                 EventCategory.valueOf(rs.getString("category")),
                 startDate,
-                endDate
+                endDate,
+                rs.getLong("calendar_id"),
+                EventColor.fromId(rs.getString("color")),
+                rs.getString("notes")
         );
     }
 

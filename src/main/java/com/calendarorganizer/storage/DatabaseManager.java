@@ -5,8 +5,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 public class DatabaseManager {
 
@@ -32,6 +36,14 @@ public class DatabaseManager {
             stmt.execute("PRAGMA journal_mode = WAL");
             stmt.execute("PRAGMA synchronous = NORMAL");
             stmt.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS calendars ("
+                            + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                            + "name TEXT UNIQUE NOT NULL, "
+                            + "color TEXT NOT NULL, "
+                            + "visible INTEGER NOT NULL DEFAULT 1)"
+            );
+            seedDefaultCalendars(stmt);
+            stmt.executeUpdate(
                     "CREATE TABLE IF NOT EXISTS events ("
                             + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                             + "uid TEXT UNIQUE NOT NULL, "
@@ -40,10 +52,15 @@ public class DatabaseManager {
                             + "end_time TEXT NOT NULL, "
                             + "category TEXT NOT NULL, "
                             + "source TEXT NOT NULL, "
-                            + "notes TEXT)"
+                            + "notes TEXT, "
+                            + "calendar_id INTEGER NOT NULL DEFAULT 1, "
+                            + "color TEXT NOT NULL DEFAULT '')"
             );
+            ensureColumnExists(stmt, "events", "calendar_id", "INTEGER NOT NULL DEFAULT 1");
+            ensureColumnExists(stmt, "events", "color", "TEXT NOT NULL DEFAULT ''");
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_events_time ON events(start_time, end_time)");
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_events_source ON events(source)");
+            stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_events_calendar ON events(calendar_id)");
             stmt.executeUpdate(
                     "CREATE TABLE IF NOT EXISTS recurring_rules ("
                             + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -53,8 +70,14 @@ public class DatabaseManager {
                             + "end_time TEXT NOT NULL, "
                             + "category TEXT NOT NULL, "
                             + "start_date TEXT, "
-                            + "end_date TEXT)"
+                            + "end_date TEXT, "
+                            + "calendar_id INTEGER NOT NULL DEFAULT 1, "
+                            + "color TEXT NOT NULL DEFAULT '', "
+                            + "notes TEXT NOT NULL DEFAULT '')"
             );
+            ensureColumnExists(stmt, "recurring_rules", "calendar_id", "INTEGER NOT NULL DEFAULT 1");
+            ensureColumnExists(stmt, "recurring_rules", "color", "TEXT NOT NULL DEFAULT ''");
+            ensureColumnExists(stmt, "recurring_rules", "notes", "TEXT NOT NULL DEFAULT ''");
             stmt.executeUpdate(
                     "CREATE TABLE IF NOT EXISTS goals ("
                             + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -73,6 +96,38 @@ public class DatabaseManager {
             );
         } catch (SQLException e) {
             throw new IllegalStateException("failed to initialize database", e);
+        }
+    }
+
+    private void seedDefaultCalendars(Statement stmt) throws SQLException {
+        int existingCount = 0;
+        try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM calendars")) {
+            if (rs.next()) {
+                existingCount = rs.getInt(1);
+            }
+        }
+        if (existingCount == 0) {
+            stmt.executeUpdate("INSERT INTO calendars (id, name, color, visible) VALUES (1, 'General', 'BLUE', 1)");
+            stmt.executeUpdate("INSERT INTO calendars (name, color, visible) VALUES ('Work', 'TEAL', 1)");
+            stmt.executeUpdate("INSERT INTO calendars (name, color, visible) VALUES ('School', 'AMBER', 1)");
+        }
+    }
+
+    private void ensureColumnExists(Statement stmt,
+                                    String tableName,
+                                    String columnName,
+                                    String definition) throws SQLException {
+        Set<String> columns = new HashSet<>();
+        try (ResultSet rs = stmt.executeQuery("PRAGMA table_info(" + tableName + ")")) {
+            while (rs.next()) {
+                String existing = rs.getString("name");
+                if (existing != null) {
+                    columns.add(existing.toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        if (!columns.contains(columnName.toLowerCase(Locale.ROOT))) {
+            stmt.executeUpdate("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + definition);
         }
     }
 
