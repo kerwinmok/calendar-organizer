@@ -78,7 +78,7 @@ public class CalendarWorkspacePane extends BorderPane implements WorkspacePaneCo
 
     @Override
     public void refreshCourses(List<Course> courses, Course preferredCourse) {
-        calendarView.refreshView();
+        // Calendar pane does not depend on course folders; StudyWorkspaceView.onTabActivated() refreshes it once.
     }
 
     @Override

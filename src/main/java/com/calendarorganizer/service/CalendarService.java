@@ -212,13 +212,23 @@ public class CalendarService {
     }
 
     public List<CalendarEvent> getEventsForWeek(LocalDate weekStart) {
+        return getEventsForWeek(weekStart, repository.findAllRecurringRules());
+    }
+
+    public List<CalendarEvent> getEventsForWeek(LocalDate weekStart, List<RecurringRule> preloadedRules) {
         List<CalendarEvent> combined = new ArrayList<>();
         combined.addAll(repository.findEventsInRange(
                 weekStart.atStartOfDay(),
                 weekStart.plusDays(7).atStartOfDay()
         ));
         LocalDate weekEndDay = weekStart.plusDays(6);
-        for (RecurringRule rule : repository.findAllRecurringRules()) {
+        List<RecurringRule> rules;
+        if (preloadedRules != null) {
+            rules = preloadedRules;
+        } else {
+            rules = List.of();
+        }
+        for (RecurringRule rule : rules) {
             combined.addAll(rule.expandForRange(weekStart, weekEndDay));
         }
         combined.sort(Comparator.comparing(CalendarEvent::getStartTime).thenComparing(CalendarEvent::getEndTime));

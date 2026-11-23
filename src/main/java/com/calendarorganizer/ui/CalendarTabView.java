@@ -520,8 +520,8 @@ public class CalendarTabView extends BorderPane {
         LocalDate targetWeek = currentWeekStart;
         long seq = refreshSeq.incrementAndGet();
         AppExecutors.ioExecutor().execute(() -> {
-            List<CalendarEvent> events = service.getEventsForWeek(targetWeek);
             List<RecurringRule> rules = service.findAllRecurringRules();
+            List<CalendarEvent> events = service.getEventsForWeek(targetWeek, rules);
             List<ScheduleGoal> goals = service.findAllGoals();
             SchedulePreferences prefs = service.loadPreferences();
             Platform.runLater(() -> {

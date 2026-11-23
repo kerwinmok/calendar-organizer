@@ -3,6 +3,7 @@ package com.calendarorganizer.ui;
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
 import com.calendarorganizer.model.EventSource;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
@@ -48,10 +49,13 @@ public class WeekGridView extends VBox {
     private final List<StackPane> dayColumns = new ArrayList<>();
     private final List<VBox> renderedCards = new ArrayList<>();
     private final Pane gutterPane;
+    private final HBox bodyColumns;
     private final ScrollPane scrollPane;
     private final Line nowLine = new Line();
+    private final PauseTransition resizeRelayoutDebounce = new PauseTransition(javafx.util.Duration.millis(40));
 
     private double hourHeight = CalendarGridMath.DEFAULT_HOUR_HEIGHT;
+    private double lastRelayoutWidth = -1.0;
     private LocalDate weekStart;
     private List<CalendarEvent> currentEvents = List.of();
     private CalendarEvent selectedEvent;
@@ -59,7 +63,6 @@ public class WeekGridView extends VBox {
     private Consumer<CalendarEvent> onEventEditRequested;
     private Consumer<CalendarEvent> onEventTimesChanged;
     private SlotCreateHandler onSlotCreateRequested;
-    private boolean relayoutScheduled;
 
     public WeekGridView() {
         HBox headerRow = new HBox();
@@ -71,8 +74,9 @@ public class WeekGridView extends VBox {
         headerRow.getChildren().add(gutterSpacer);
 
         gutterPane = buildTimeGutter();
-        HBox bodyColumns = new HBox();
+        this.bodyColumns = new HBox();
         bodyColumns.getChildren().add(gutterPane);
+        resizeRelayoutDebounce.setOnFinished(e -> renderEvents());
 
         nowLine.getStyleClass().add("now-line");
         nowLine.setStartX(0);
@@ -113,8 +117,13 @@ public class WeekGridView extends VBox {
             bodyColumns.getChildren().add(columnStack);
         }
 
-        //coalesce resize relayouts to once per ui frame
-        bodyColumns.widthProperty().addListener((obs, oldW, newW) -> scheduleRelayout());
+        //coalesce resize relayouts to reduce layout churn while dragging dividers
+        bodyColumns.widthProperty().addListener((obs, oldW, newW) -> {
+            double width = newW.doubleValue();
+            if (lastRelayoutWidth < 0.0 || Math.abs(width - lastRelayoutWidth) >= 2.0) {
+                scheduleRelayout();
+            }
+        });
 
         scrollPane = new ScrollPane(bodyColumns);
         scrollPane.setFitToWidth(true);
@@ -286,14 +295,7 @@ public class WeekGridView extends VBox {
     }
 
     private void scheduleRelayout() {
-        if (relayoutScheduled) {
-            return;
-        }
-        relayoutScheduled = true;
-        Platform.runLater(() -> {
-            relayoutScheduled = false;
-            renderEvents();
-        });
+        resizeRelayoutDebounce.playFromStart();
     }
 
     public void setOnEventSelected(Consumer<CalendarEvent> listener) {
@@ -362,6 +364,7 @@ public class WeekGridView extends VBox {
         if (weekStart == null) {
             return;
         }
+        lastRelayoutWidth = bodyColumns.getWidth();
         renderedCards.clear();
         LocalDate today = LocalDate.now();
         for (int d = 0; d < 7; d++) {
