@@ -6,14 +6,11 @@ import com.calendarorganizer.course.CourseFilePreviewer;
 import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.llm.ParserMode;
-import com.calendarorganizer.notebook.GeminiNotebookSyncService;
-import com.calendarorganizer.notebook.NotebookSyncResult;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.StorageStats;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -30,8 +27,6 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
-import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MainWindow extends BorderPane {
@@ -45,7 +40,6 @@ public class MainWindow extends BorderPane {
     private final CalendarService calendarService;
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
-    private final GeminiNotebookSyncService notebookSyncService;
     private final CalendarTabView calendarTabView;
     private CourseTabView courseTabView;
     private StudyWorkspaceView studyWorkspaceView;
@@ -73,11 +67,9 @@ public class MainWindow extends BorderPane {
 
     private final Button autoScheduleBtn = new Button("Auto-Schedule");
     private final MenuButton icsMenuBtn = new MenuButton("ICS");
-    private final MenuButton notebookMenuBtn = new MenuButton("Notebook");
     private final HBox calendarActionsBox;
 
     private final Button renderCourseBtn = new Button("Render");
-    private final Button syncNotebookBtn = new Button("Sync Notebook");
     private final Button exportCourseBtn = new Button("Export Course");
     private final Button exportAllBtn = new Button("Export All");
     private final HBox courseActionsBox;
@@ -102,19 +94,16 @@ public class MainWindow extends BorderPane {
 
     public MainWindow(CalendarService calendarService,
                       CourseManager courseManager,
-                      CourseExporter courseExporter,
-                      GeminiNotebookSyncService notebookSyncService) {
+                      CourseExporter courseExporter) {
         this.calendarService = calendarService;
         this.courseManager = courseManager;
         this.courseExporter = courseExporter;
-        this.notebookSyncService = notebookSyncService;
         this.calendarTabView = new CalendarTabView(calendarService);
         this.activeTheme = UiTheme.fromId(calendarService.loadTheme());
         this.themeDetector = new WindowsThemeDetector(this::handleSystemThemeChanged);
         this.systemDarkMode = themeDetector.isDarkMode();
         this.themeDetector.start();
 
-        configureNotebookMenu();
         this.calendarCommandBox = buildCalendarCommandBox();
         this.courseCommandBox = buildCourseCommandBox();
         this.calendarActionsBox = buildCalendarActionsBox();
@@ -156,7 +145,6 @@ public class MainWindow extends BorderPane {
                     courseManager,
                     previewer,
                     calendarService,
-                    notebookSyncService,
                     savedLayout,
                     () -> {
                         if (courseTabView != null) {
@@ -164,8 +152,6 @@ public class MainWindow extends BorderPane {
                         }
                         return null;
                     },
-                    calendarTabView::getCurrentWeekStart,
-                    this::openNotebookConnectDialog,
                     json -> AppExecutors.ioExecutor().execute(() -> calendarService.saveWorkspaceLayout(json))
             );
             view.setActiveTheme(getResolvedTheme());
@@ -242,25 +228,13 @@ public class MainWindow extends BorderPane {
         Button settingsBtn = new Button("Settings");
         settingsBtn.setOnAction(e -> openSettingsDialog());
 
-        HBox rightCluster = new HBox(8, calendarActionsBox, courseActionsBox, notebookMenuBtn, settingsBtn);
+        HBox rightCluster = new HBox(8, calendarActionsBox, courseActionsBox, settingsBtn);
         rightCluster.setAlignment(Pos.CENTER_RIGHT);
 
         HBox topBar = new HBox(10, leftCluster, leftSpacer, calendarCommandBox, courseCommandBox, rightSpacer, rightCluster);
         topBar.getStyleClass().add("lc-topbar");
         topBar.setAlignment(Pos.CENTER_LEFT);
         return topBar;
-    }
-
-    private void configureNotebookMenu() {
-        MenuItem syncCourseItem = new MenuItem("Sync Selected Course to Notebook");
-        syncCourseItem.setOnAction(e -> syncSelectedCourseToNotebook());
-        MenuItem syncSchedItem = new MenuItem("Sync Schedule to Notebook");
-        syncSchedItem.setOnAction(e -> syncScheduleToNotebook());
-        MenuItem syncAllItem = new MenuItem("Sync All Courses + Schedule");
-        syncAllItem.setOnAction(e -> syncAllToNotebook());
-        MenuItem connectNbItem = new MenuItem("Connect Gemini Notebook...");
-        connectNbItem.setOnAction(e -> openNotebookConnectDialog());
-        notebookMenuBtn.getItems().setAll(syncCourseItem, syncSchedItem, syncAllItem, connectNbItem);
     }
 
     private HBox buildCalendarCommandBox() {
@@ -323,9 +297,6 @@ public class MainWindow extends BorderPane {
         renderCourseBtn.setDisable(true);
         renderCourseBtn.setOnAction(e -> openRenderPane());
 
-        syncNotebookBtn.setDisable(true);
-        syncNotebookBtn.setOnAction(e -> syncSelectedCourseToNotebook());
-
         exportCourseBtn.setOnAction(e -> {
             if (courseTabView != null) {
                 courseTabView.exportSelectedCourse();
@@ -337,7 +308,7 @@ public class MainWindow extends BorderPane {
             }
         });
 
-        HBox box = new HBox(6, renderCourseBtn, syncNotebookBtn, exportCourseBtn, exportAllBtn);
+        HBox box = new HBox(6, renderCourseBtn, exportCourseBtn, exportAllBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
         return box;
     }
@@ -643,7 +614,6 @@ public class MainWindow extends BorderPane {
         SettingsDialog dialog = new SettingsDialog(
                 getScene().getWindow(),
                 calendarService,
-                notebookSyncService,
                 activeTheme,
                 () -> systemDarkMode,
                 this::applyTheme,
@@ -660,125 +630,6 @@ public class MainWindow extends BorderPane {
         } finally {
             this.openSettingsDialog = null;
         }
-    }
-
-    private void openNotebookConnectDialog() {
-        NotebookConnectDialog dialog = new NotebookConnectDialog(
-                getScene().getWindow(),
-                notebookSyncService,
-                getResolvedTheme()
-        );
-        dialog.showAndWait();
-        if (notebookSyncService.loadConfig().isSignedIn()) {
-            updateStatus("Connected to Gemini Notebook.");
-        }
-    }
-
-    private boolean ensureNotebookSignedIn() {
-        if (notebookSyncService.loadConfig().isSignedIn()) {
-            return true;
-        }
-        NotebookConnectDialog dialog = new NotebookConnectDialog(
-                getScene().getWindow(),
-                notebookSyncService,
-                getResolvedTheme()
-        );
-        dialog.showAndWait();
-        return notebookSyncService.loadConfig().isSignedIn();
-    }
-
-    private void syncScheduleToNotebook() {
-        if (!ensureNotebookSignedIn()) {
-            return;
-        }
-        runNotebookSync(
-                "Syncing calendar schedule to Gemini Notebook...",
-                () -> List.of(notebookSyncService.syncSchedule(calendarTabView.getCurrentWeekStart()))
-        );
-    }
-
-    private void syncAllToNotebook() {
-        if (!ensureNotebookSignedIn()) {
-            return;
-        }
-        flushPendingEdits();
-        runNotebookSync(
-                "Syncing schedule and all courses to Gemini Notebook...",
-                () -> notebookSyncService.syncAll(calendarTabView.getCurrentWeekStart())
-        );
-    }
-
-    private void syncSelectedCourseToNotebook() {
-        if (courseTabView == null || !courseTabView.hasSelectedCourse()) {
-            updateStatus("Select a course in Courses (or use Sync Course inside a Notebook pane).");
-            return;
-        }
-        Course selected = courseTabView.getSelectedCourse();
-        if (selected == null || !ensureNotebookSignedIn()) {
-            return;
-        }
-        flushPendingEdits();
-        runNotebookSync(
-                "Syncing " + selected.getDisplayName() + " to Gemini Notebook...",
-                () -> List.of(notebookSyncService.syncCourse(selected))
-        );
-    }
-
-    private void runNotebookSync(String startStatus, Callable<List<NotebookSyncResult>> work) {
-        updateStatus(startStatus);
-        notebookMenuBtn.setDisable(true);
-        syncNotebookBtn.setDisable(true);
-
-        AppExecutors.ioExecutor().execute(() -> {
-            try {
-                List<NotebookSyncResult> results = work.call();
-                Platform.runLater(() -> {
-                    notebookMenuBtn.setDisable(false);
-                    refreshCourseFooterUi();
-                    String summary = GeminiNotebookSyncService.formatBatchSummary(results);
-                    updateStatus(summary);
-                    showNotebookSyncAlert(Alert.AlertType.INFORMATION, "Gemini Notebook Sync Complete", summary, results);
-                });
-            } catch (Exception ex) {
-                Platform.runLater(() -> {
-                    notebookMenuBtn.setDisable(false);
-                    refreshCourseFooterUi();
-                    String err = ex.getMessage();
-                    if (err == null || err.isBlank()) {
-                        err = "Gemini Notebook sync failed.";
-                    }
-                    updateStatus(err);
-                    showNotebookSyncAlert(Alert.AlertType.ERROR, "Gemini Notebook Sync Failed", err, List.of());
-                });
-            }
-        });
-    }
-
-    private void showNotebookSyncAlert(
-            Alert.AlertType type,
-            String header,
-            String summary,
-            List<NotebookSyncResult> results
-    ) {
-        Alert alert = new Alert(type);
-        alert.initOwner(getScene().getWindow());
-        alert.setTitle("Gemini Notebook Sync");
-        alert.setHeaderText(header);
-
-        StringBuilder body = new StringBuilder();
-        if (results.isEmpty()) {
-            body.append(summary);
-        } else {
-            for (NotebookSyncResult res : results) {
-                body.append("• ").append(res.formatSummary()).append("\n");
-                for (String warning : res.getWarnings()) {
-                    body.append("  - ").append(warning).append("\n");
-                }
-            }
-        }
-        alert.setContentText(body.toString().trim());
-        WindowsTitleBar.styleDialog(alert, getResolvedTheme());
-        alert.showAndWait();
     }
 
     public void flushPendingEdits() {
@@ -862,13 +713,11 @@ public class MainWindow extends BorderPane {
             coursePathBottomLabel.setText(courseTabView.getActiveLocationSummary());
             boolean hasSelected = courseTabView.hasSelectedCourse();
             renderCourseBtn.setDisable(!hasSelected);
-            syncNotebookBtn.setDisable(!hasSelected);
             exportCourseBtn.setDisable(!hasSelected);
             exportAllBtn.setDisable(!courseTabView.hasCourses());
         } else {
             coursePathBottomLabel.setText("No course file selected");
             renderCourseBtn.setDisable(true);
-            syncNotebookBtn.setDisable(true);
             exportCourseBtn.setDisable(true);
             exportAllBtn.setDisable(true);
         }

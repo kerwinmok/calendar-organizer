@@ -128,8 +128,19 @@ public class WorkspaceLayoutConfig {
         WorkspaceLayoutConfig cfg = new WorkspaceLayoutConfig();
         cfg.layoutMode = LayoutMode.HORIZONTAL;
         cfg.panes.add(new PaneState(WorkspacePaneType.LECTURE));
-        cfg.panes.add(new PaneState(WorkspacePaneType.NOTES));
-        cfg.primaryDividers.add(0.55);
+        cfg.panes.add(new PaneState(WorkspacePaneType.ONENOTE));
+        cfg.primaryDividers.add(0.50);
+        return cfg;
+    }
+
+    public static WorkspaceLayoutConfig studyTrioConfig() {
+        WorkspaceLayoutConfig cfg = new WorkspaceLayoutConfig();
+        cfg.layoutMode = LayoutMode.GRID;
+        cfg.panes.add(new PaneState(WorkspacePaneType.LECTURE));
+        cfg.panes.add(new PaneState(WorkspacePaneType.CALENDAR));
+        cfg.panes.add(new PaneState(WorkspacePaneType.ONENOTE));
+        cfg.primaryDividers.add(0.48);
+        cfg.firstGroupDividers.add(0.62);
         return cfg;
     }
 
@@ -194,9 +205,9 @@ public class WorkspaceLayoutConfig {
             present.add(state.getType());
         }
         WorkspacePaneType[] preferred = {
+                WorkspacePaneType.CALENDAR,
+                WorkspacePaneType.ONENOTE,
                 WorkspacePaneType.NOTES,
-                WorkspacePaneType.NOTEBOOK,
-                WorkspacePaneType.EXTERNAL,
                 WorkspacePaneType.LECTURE
         };
         for (WorkspacePaneType candidate : preferred) {
@@ -218,7 +229,11 @@ public class WorkspaceLayoutConfig {
         for (PaneState p : panes) {
             if (p != null) {
                 if (p.type == null) {
-                    p.type = WorkspacePaneType.LECTURE;
+                    if (clean.isEmpty()) {
+                        p.type = WorkspacePaneType.LECTURE;
+                    } else {
+                        p.type = WorkspacePaneType.ONENOTE;
+                    }
                 }
                 clean.add(p);
                 if (clean.size() >= MAX_PANES) {
@@ -229,10 +244,10 @@ public class WorkspaceLayoutConfig {
         while (clean.size() < MIN_PANES) {
             if (clean.isEmpty()) {
                 clean.add(new PaneState(WorkspacePaneType.LECTURE));
-            } else if (clean.get(0).getType() != WorkspacePaneType.NOTES) {
-                clean.add(new PaneState(WorkspacePaneType.NOTES));
+            } else if (clean.get(0).getType() != WorkspacePaneType.ONENOTE) {
+                clean.add(new PaneState(WorkspacePaneType.ONENOTE));
             } else {
-                clean.add(new PaneState(WorkspacePaneType.NOTEBOOK));
+                clean.add(new PaneState(WorkspacePaneType.CALENDAR));
             }
         }
         this.panes = clean;

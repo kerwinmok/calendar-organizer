@@ -56,7 +56,7 @@ try {
         --main-class "com.calendarorganizer.Launcher" `
         --app-version $cleanVersion `
         --icon $iconPath `
-        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.httpserver,jdk.unsupported" `
+        --add-modules "java.base,java.sql,java.net.http,java.desktop,java.logging,java.xml,jdk.crypto.ec,jdk.unsupported" `
         --java-options "-Xms16m" `
         --java-options "-Xmx192m" `
         --java-options "-XX:+UseSerialGC" `

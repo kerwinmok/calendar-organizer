@@ -1,7 +1,5 @@
 package com.calendarorganizer.ui;
 
-import com.calendarorganizer.notebook.GeminiNotebookSyncService;
-import com.calendarorganizer.notebook.NotebookConfig;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.StorageStats;
 import javafx.concurrent.Task;
@@ -32,7 +30,6 @@ import java.util.function.Consumer;
 public class SettingsDialog extends Dialog<Void> {
 
     private final CalendarService service;
-    private final GeminiNotebookSyncService notebookSyncService;
     private final BooleanSupplier systemDarkSupplier;
     private final Consumer<UiTheme> onThemeChanged;
     private final Runnable onDataChanged;
@@ -41,21 +38,18 @@ public class SettingsDialog extends Dialog<Void> {
     private final Label dbStatsLabel = new Label();
     private final Label memoryLabel = new Label();
     private final Label geminiStatusLabel = new Label();
-    private final Label notebookStatusLabel = new Label();
     private final Button clearKeyBtn = new Button("Clear Key");
     private final Label feedbackLabel = new Label("");
     private UiTheme activeTheme;
 
     public SettingsDialog(Window owner,
                           CalendarService service,
-                          GeminiNotebookSyncService notebookSyncService,
                           UiTheme currentTheme,
                           BooleanSupplier systemDarkSupplier,
                           Consumer<UiTheme> onThemeChanged,
                           Runnable onDataChanged,
                           Consumer<String> onStatus) {
         this.service = service;
-        this.notebookSyncService = notebookSyncService;
         this.activeTheme = currentTheme;
         if (systemDarkSupplier == null) {
             this.systemDarkSupplier = () -> true;
@@ -73,7 +67,7 @@ public class SettingsDialog extends Dialog<Void> {
         DialogPane pane = getDialogPane();
         WindowsTitleBar.styleDialog(this, currentTheme.resolve(this.systemDarkSupplier.getAsBoolean()));
         pane.getButtonTypes().add(ButtonType.CLOSE);
-        pane.setPrefSize(500, 610);
+        pane.setPrefSize(500, 560);
 
         ScrollPane scroll = new ScrollPane(buildContent());
         scroll.setFitToWidth(true);
@@ -81,7 +75,6 @@ public class SettingsDialog extends Dialog<Void> {
         scroll.getStyleClass().add("lc-dialog-scroll");
         pane.setContent(scroll);
         refreshAiStatus();
-        refreshNotebookStatus();
         refreshStats();
     }
 
@@ -163,25 +156,6 @@ public class SettingsDialog extends Dialog<Void> {
         HBox ollamaRow = new HBox(6, ollamaHostField, ollamaModelField, saveOllamaBtn);
         ollamaRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label notebookHeading = new Label("Gemini Notebook Sync (Direct OAuth)");
-        notebookHeading.getStyleClass().add("section-heading");
-
-        notebookStatusLabel.getStyleClass().add("dim-label");
-        notebookStatusLabel.setWrapText(true);
-
-        Button connectNotebookBtn = new Button("Connect / Configure Notebook...");
-        connectNotebookBtn.setMaxWidth(Double.MAX_VALUE);
-        connectNotebookBtn.setOnAction(e -> {
-            UiTheme resolved = activeTheme.resolve(systemDarkSupplier.getAsBoolean());
-            NotebookConnectDialog dialog = new NotebookConnectDialog(
-                    getDialogPane().getScene().getWindow(),
-                    notebookSyncService,
-                    resolved
-            );
-            dialog.showAndWait();
-            refreshNotebookStatus();
-        });
-
         Label storageHeading = new Label("Calendar Storage & Performance");
         storageHeading.getStyleClass().add("section-heading");
 
@@ -221,10 +195,6 @@ public class SettingsDialog extends Dialog<Void> {
                 geminiStatusLabel,
                 geminiRow,
                 ollamaRow,
-                new Separator(),
-                notebookHeading,
-                notebookStatusLabel,
-                connectNotebookBtn,
                 new Separator(),
                 storageHeading,
                 dbStatsLabel,
@@ -322,25 +292,6 @@ public class SettingsDialog extends Dialog<Void> {
             geminiStatusLabel.setText("Gemini: Not set — offline parser active");
         }
         clearKeyBtn.setDisable(!hasSaved);
-    }
-
-    private void refreshNotebookStatus() {
-        if (notebookSyncService == null) {
-            notebookStatusLabel.setText("Gemini Notebook sync unavailable.");
-            return;
-        }
-        NotebookConfig cfg = notebookSyncService.loadConfig();
-        if (cfg.isSignedIn()) {
-            String account = "Connected";
-            if (!cfg.getAccountEmail().isBlank()) {
-                account = "Connected as " + cfg.getAccountEmail();
-            }
-            notebookStatusLabel.setText(account + " (Project: " + cfg.getProjectId() + ")");
-        } else if (cfg.hasOAuthClient()) {
-            notebookStatusLabel.setText("OAuth client saved (Project: " + cfg.getProjectId() + ") — sign in to connect.");
-        } else {
-            notebookStatusLabel.setText("Not connected — click below to import OAuth JSON & sign in.");
-        }
     }
 
     private void refreshStats() {

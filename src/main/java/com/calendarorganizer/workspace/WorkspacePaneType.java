@@ -4,9 +4,9 @@ import java.util.Locale;
 
 public enum WorkspacePaneType {
     LECTURE("lecture", "Lecture Viewer"),
-    NOTES("notes", "Notes Editor"),
-    NOTEBOOK("notebook", "Gemini Notebook"),
-    EXTERNAL("external", "External App");
+    ONENOTE("onenote", "OneNote Dock"),
+    CALENDAR("calendar", "Calendar"),
+    NOTES("notes", "Notes Editor");
 
     private final String id;
     private final String displayName;

@@ -3,7 +3,6 @@ package com.calendarorganizer.ui;
 import com.calendarorganizer.course.Course;
 import com.calendarorganizer.course.CourseFilePreviewer;
 import com.calendarorganizer.course.CourseManager;
-import com.calendarorganizer.notebook.GeminiNotebookSyncService;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.workspace.WorkspaceLayoutConfig;
@@ -28,7 +27,6 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.util.Duration;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,10 +38,7 @@ public class StudyWorkspaceView extends BorderPane {
     private final CourseManager courseManager;
     private final CourseFilePreviewer previewer;
     private final CalendarService calendarService;
-    private final GeminiNotebookSyncService notebookSyncService;
     private final Supplier<Course> preferredCourseSupplier;
-    private final Supplier<LocalDate> activeWeekSupplier;
-    private final Runnable onOpenNotebookConnect;
     private final Consumer<String> onLayoutSaved;
 
     private final ComboBox<WorkspaceLayoutConfig.LayoutMode> layoutModeBox = new ComboBox<>();
@@ -94,20 +89,14 @@ public class StudyWorkspaceView extends BorderPane {
             CourseManager courseManager,
             CourseFilePreviewer previewer,
             CalendarService calendarService,
-            GeminiNotebookSyncService notebookSyncService,
             String savedLayoutJson,
             Supplier<Course> preferredCourseSupplier,
-            Supplier<LocalDate> activeWeekSupplier,
-            Runnable onOpenNotebookConnect,
             Consumer<String> onLayoutSaved
     ) {
         this.courseManager = courseManager;
         this.previewer = previewer;
         this.calendarService = calendarService;
-        this.notebookSyncService = notebookSyncService;
         this.preferredCourseSupplier = preferredCourseSupplier;
-        this.activeWeekSupplier = activeWeekSupplier;
-        this.onOpenNotebookConnect = onOpenNotebookConnect;
         this.onLayoutSaved = onLayoutSaved;
         this.layoutConfig = WorkspaceLayoutConfig.fromJson(savedLayoutJson);
 
@@ -229,20 +218,16 @@ public class StudyWorkspaceView extends BorderPane {
                     this::scheduleLayoutSave
             );
         }
-        if (type == WorkspacePaneType.NOTEBOOK) {
-            return new NotebookWorkspacePane(
-                    notebookSyncService,
-                    calendarService,
+        if (type == WorkspacePaneType.ONENOTE) {
+            return new ExternalAppWorkspacePane(
                     state,
-                    activeWeekSupplier,
-                    this::flushPendingEdits,
-                    onOpenNotebookConnect,
                     this::publishStatus,
                     this::scheduleLayoutSave
             );
         }
-        if (type == WorkspacePaneType.EXTERNAL) {
-            return new ExternalAppWorkspacePane(
+        if (type == WorkspacePaneType.CALENDAR) {
+            return new NotesWorkspacePane(
+                    courseManager,
                     state,
                     this::publishStatus,
                     this::scheduleLayoutSave

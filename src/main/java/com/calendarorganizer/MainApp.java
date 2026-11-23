@@ -2,7 +2,6 @@ package com.calendarorganizer;
 
 import com.calendarorganizer.course.CourseExporter;
 import com.calendarorganizer.course.CourseManager;
-import com.calendarorganizer.notebook.GeminiNotebookSyncService;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.AppPaths;
 import com.calendarorganizer.storage.CalendarRepository;
@@ -31,9 +30,8 @@ public class MainApp extends Application {
         CalendarService calendarService = new CalendarService(repository);
         CourseManager courseManager = new CourseManager(paths.getCoursesDir());
         CourseExporter courseExporter = new CourseExporter(courseManager);
-        GeminiNotebookSyncService notebookSyncService = new GeminiNotebookSyncService(repository, calendarService, courseManager);
 
-        MainWindow root = new MainWindow(calendarService, courseManager, courseExporter, notebookSyncService);
+        MainWindow root = new MainWindow(calendarService, courseManager, courseExporter);
         this.mainWindow = root;
         Scene scene = new Scene(root, 1240, 780);
         URL cssUrl = MainApp.class.getResource("/styles.css");
