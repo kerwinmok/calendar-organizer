@@ -640,10 +640,6 @@ public class MainWindow extends BorderPane {
     }
 
     private void openSettingsDialog() {
-        boolean temporarilyDetached = activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null;
-        if (temporarilyDetached) {
-            studyWorkspaceView.setDockTemporarilyDetached(true);
-        }
         SettingsDialog dialog = new SettingsDialog(
                 getScene().getWindow(),
                 calendarService,
@@ -662,9 +658,6 @@ public class MainWindow extends BorderPane {
             dialog.showAndWait();
         } finally {
             this.openSettingsDialog = null;
-            if (temporarilyDetached && activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
-                studyWorkspaceView.setDockTemporarilyDetached(false);
-            }
         }
     }
 

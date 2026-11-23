@@ -4,7 +4,6 @@ import java.util.Locale;
 
 public enum WorkspacePaneType {
     LECTURE("lecture", "Lecture Viewer"),
-    ONENOTE("onenote", "OneNote Dock"),
     CALENDAR("calendar", "Calendar"),
     NOTES("notes", "Notes Editor");
 

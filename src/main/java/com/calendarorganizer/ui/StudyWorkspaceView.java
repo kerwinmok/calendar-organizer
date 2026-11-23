@@ -50,7 +50,7 @@ public class StudyWorkspaceView extends BorderPane {
 
     private final ComboBox<WorkspaceLayoutConfig.LayoutMode> layoutModeBox = new ComboBox<>();
     private final MenuButton addPaneBtn = new MenuButton("+ Add Pane");
-    private final Button studyTrioBtn = new Button("Study Trio (PDF + Cal + OneNote)");
+    private final Button studyTrioBtn = new Button("PDF + Notes + Calendar");
     private final Button resetLayoutBtn = new Button("Reset");
     private final Label paneCountLabel = new Label();
     private final Button fullScreenBtn = new Button("Full Screen");
@@ -313,7 +313,6 @@ public class StudyWorkspaceView extends BorderPane {
         captureLiveDividersIntoConfig();
         Collections.swap(slots, sourceIndex, targetIndex);
         rebuildLayoutGraph();
-        syncDockedPanesAfterRelayout();
         scheduleLayoutSave();
         publishStatus("Swapped workspace pane positions.");
     }
@@ -326,12 +325,6 @@ public class StudyWorkspaceView extends BorderPane {
                     state,
                     this::publishStatus,
                     this::scheduleLayoutSave
-            );
-        }
-        if (type == WorkspacePaneType.ONENOTE) {
-            return new OneNoteDockPane(
-                    state,
-                    this::publishStatus
             );
         }
         if (type == WorkspacePaneType.CALENDAR) {
@@ -420,7 +413,7 @@ public class StudyWorkspaceView extends BorderPane {
         initializeFromConfig();
         applyCoursesToAllSlots();
         scheduleLayoutSave();
-        publishStatus("Loaded Study Trio: Lecture Viewer + Calendar + OneNote Dock.");
+        publishStatus("Loaded Study Trio: Lecture Viewer + Notes Editor + Calendar.");
     }
 
     private void resetToDefaultLayout() {
@@ -671,23 +664,11 @@ public class StudyWorkspaceView extends BorderPane {
         }
     }
 
-    private void syncDockedPanesAfterRelayout() {
-        Platform.runLater(() -> {
-            for (PaneSlot slot : slots) {
-                if (slot.content instanceof OneNoteDockPane) {
-                    ((OneNoteDockPane) slot.content).requestCoalescedBoundsSync();
-                }
-            }
-        });
-    }
-
     public void onTabActivated() {
         refreshCoursesAsync();
         for (PaneSlot slot : slots) {
             if (slot.content instanceof CalendarWorkspacePane) {
                 ((CalendarWorkspacePane) slot.content).refreshCalendar();
-            } else if (slot.content instanceof OneNoteDockPane) {
-                ((OneNoteDockPane) slot.content).onHostShown();
             }
         }
     }
@@ -695,23 +676,7 @@ public class StudyWorkspaceView extends BorderPane {
     public void onTabDeactivated() {
         flushPendingEdits();
         for (PaneSlot slot : slots) {
-            if (slot.content instanceof OneNoteDockPane) {
-                ((OneNoteDockPane) slot.content).onHostHidden();
-            } else {
-                slot.content.releaseResources();
-            }
-        }
-    }
-
-    public void setDockTemporarilyDetached(boolean detached) {
-        for (PaneSlot slot : slots) {
-            if (slot.content instanceof OneNoteDockPane) {
-                if (detached) {
-                    ((OneNoteDockPane) slot.content).onHostHidden();
-                } else {
-                    ((OneNoteDockPane) slot.content).onHostShown();
-                }
-            }
+            slot.content.releaseResources();
         }
     }
 

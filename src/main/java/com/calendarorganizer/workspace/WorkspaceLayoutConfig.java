@@ -128,8 +128,8 @@ public class WorkspaceLayoutConfig {
         WorkspaceLayoutConfig cfg = new WorkspaceLayoutConfig();
         cfg.layoutMode = LayoutMode.HORIZONTAL;
         cfg.panes.add(new PaneState(WorkspacePaneType.LECTURE));
-        cfg.panes.add(new PaneState(WorkspacePaneType.ONENOTE));
-        cfg.primaryDividers.add(0.50);
+        cfg.panes.add(new PaneState(WorkspacePaneType.CALENDAR));
+        cfg.primaryDividers.add(0.55);
         return cfg;
     }
 
@@ -137,9 +137,9 @@ public class WorkspaceLayoutConfig {
         WorkspaceLayoutConfig cfg = new WorkspaceLayoutConfig();
         cfg.layoutMode = LayoutMode.GRID;
         cfg.panes.add(new PaneState(WorkspacePaneType.LECTURE));
+        cfg.panes.add(new PaneState(WorkspacePaneType.NOTES));
         cfg.panes.add(new PaneState(WorkspacePaneType.CALENDAR));
-        cfg.panes.add(new PaneState(WorkspacePaneType.ONENOTE));
-        cfg.primaryDividers.add(0.48);
+        cfg.primaryDividers.add(0.52);
         cfg.firstGroupDividers.add(0.62);
         return cfg;
     }
@@ -206,7 +206,6 @@ public class WorkspaceLayoutConfig {
         }
         WorkspacePaneType[] preferred = {
                 WorkspacePaneType.CALENDAR,
-                WorkspacePaneType.ONENOTE,
                 WorkspacePaneType.NOTES,
                 WorkspacePaneType.LECTURE
         };
@@ -232,7 +231,7 @@ public class WorkspaceLayoutConfig {
                     if (clean.isEmpty()) {
                         p.type = WorkspacePaneType.LECTURE;
                     } else {
-                        p.type = WorkspacePaneType.ONENOTE;
+                        p.type = WorkspacePaneType.CALENDAR;
                     }
                 }
                 clean.add(p);
@@ -244,10 +243,10 @@ public class WorkspaceLayoutConfig {
         while (clean.size() < MIN_PANES) {
             if (clean.isEmpty()) {
                 clean.add(new PaneState(WorkspacePaneType.LECTURE));
-            } else if (clean.get(0).getType() != WorkspacePaneType.ONENOTE) {
-                clean.add(new PaneState(WorkspacePaneType.ONENOTE));
-            } else {
+            } else if (clean.get(0).getType() != WorkspacePaneType.CALENDAR) {
                 clean.add(new PaneState(WorkspacePaneType.CALENDAR));
+            } else {
+                clean.add(new PaneState(WorkspacePaneType.NOTES));
             }
         }
         this.panes = clean;

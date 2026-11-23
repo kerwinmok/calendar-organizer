@@ -13,15 +13,15 @@ class WorkspaceLayoutConfigTest {
         WorkspaceLayoutConfig defaults = WorkspaceLayoutConfig.defaultConfig();
         assertEquals(2, defaults.getPanes().size());
         assertEquals(WorkspacePaneType.LECTURE, defaults.getPanes().get(0).getType());
-        assertEquals(WorkspacePaneType.ONENOTE, defaults.getPanes().get(1).getType());
-        assertEquals(WorkspacePaneType.CALENDAR, defaults.nextSuggestedType());
+        assertEquals(WorkspacePaneType.CALENDAR, defaults.getPanes().get(1).getType());
+        assertEquals(WorkspacePaneType.NOTES, defaults.nextSuggestedType());
 
         WorkspaceLayoutConfig trio = WorkspaceLayoutConfig.studyTrioConfig();
         assertEquals(WorkspaceLayoutConfig.LayoutMode.GRID, trio.getLayoutMode());
         assertEquals(3, trio.getPanes().size());
         assertEquals(WorkspacePaneType.LECTURE, trio.getPanes().get(0).getType());
-        assertEquals(WorkspacePaneType.CALENDAR, trio.getPanes().get(1).getType());
-        assertEquals(WorkspacePaneType.ONENOTE, trio.getPanes().get(2).getType());
+        assertEquals(WorkspacePaneType.NOTES, trio.getPanes().get(1).getType());
+        assertEquals(WorkspacePaneType.CALENDAR, trio.getPanes().get(2).getType());
 
         WorkspaceLayoutConfig custom = new WorkspaceLayoutConfig();
         custom.setLayoutMode(WorkspaceLayoutConfig.LayoutMode.GRID);
@@ -29,7 +29,7 @@ class WorkspaceLayoutConfigTest {
                 new WorkspaceLayoutConfig.PaneState(WorkspacePaneType.LECTURE, "CMPT 201", "", ""),
                 new WorkspaceLayoutConfig.PaneState(WorkspacePaneType.NOTES, "CMPT 201", "", ""),
                 new WorkspaceLayoutConfig.PaneState(WorkspacePaneType.CALENDAR, "", "", ""),
-                new WorkspaceLayoutConfig.PaneState(WorkspacePaneType.ONENOTE, "", "OneNote Desktop", ""),
+                new WorkspaceLayoutConfig.PaneState(WorkspacePaneType.NOTES, "MATH 100", "", ""),
                 new WorkspaceLayoutConfig.PaneState(WorkspacePaneType.LECTURE, "EXTRA", "", "")
         ));
         custom.setPrimaryDividers(List.of(0.52));
@@ -43,17 +43,17 @@ class WorkspaceLayoutConfigTest {
         assertEquals(4, restored.getPanes().size());
         assertEquals("CMPT 201", restored.getPanes().get(1).getTargetCourse());
         assertEquals(WorkspacePaneType.CALENDAR, restored.getPanes().get(2).getType());
-        assertEquals(WorkspacePaneType.ONENOTE, restored.getPanes().get(3).getType());
+        assertEquals(WorkspacePaneType.NOTES, restored.getPanes().get(3).getType());
         assertEquals(0.52, restored.getPrimaryDividers().get(0), 0.001);
         assertEquals(0.60, restored.getFirstGroupDividers().get(0), 0.001);
         assertEquals(0.45, restored.getSecondGroupDividers().get(0), 0.001);
 
         WorkspaceLayoutConfig legacyUnknown = WorkspaceLayoutConfig.fromJson(
-                "{\"layoutMode\":\"HORIZONTAL\",\"panes\":[{\"type\":\"NOTEBOOK\"},{\"type\":\"EXTERNAL\"}]}"
+                "{\"layoutMode\":\"HORIZONTAL\",\"panes\":[{\"type\":\"NOTEBOOK\"},{\"type\":\"ONENOTE\"}]}"
         );
         assertEquals(2, legacyUnknown.getPanes().size());
         assertEquals(WorkspacePaneType.LECTURE, legacyUnknown.getPanes().get(0).getType());
-        assertEquals(WorkspacePaneType.ONENOTE, legacyUnknown.getPanes().get(1).getType());
+        assertEquals(WorkspacePaneType.CALENDAR, legacyUnknown.getPanes().get(1).getType());
 
         WorkspaceLayoutConfig malformed = WorkspaceLayoutConfig.fromJson("{broken json");
         assertEquals(2, malformed.getPanes().size());
