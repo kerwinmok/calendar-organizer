@@ -19,6 +19,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Line;
+import javafx.scene.shape.Rectangle;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Consumer;
@@ -60,6 +62,7 @@ public class WeekGridView extends VBox {
     private List<CalendarEvent> currentEvents = List.of();
     private CalendarEvent selectedEvent;
     private Consumer<CalendarEvent> onEventSelected;
+    private Consumer<List<CalendarEvent>> onEventGroupSelected;
     private Consumer<CalendarEvent> onEventEditRequested;
     private Consumer<CalendarEvent> onEventTimesChanged;
     private SlotCreateHandler onSlotCreateRequested;
@@ -302,6 +305,10 @@ public class WeekGridView extends VBox {
         this.onEventSelected = listener;
     }
 
+    public void setOnEventGroupSelected(Consumer<List<CalendarEvent>> listener) {
+        this.onEventGroupSelected = listener;
+    }
+
     public void setOnEventEditRequested(Consumer<CalendarEvent> listener) {
         this.onEventEditRequested = listener;
     }
@@ -330,11 +337,27 @@ public class WeekGridView extends VBox {
         this.selectedEvent = selectedEvent;
         for (VBox card : renderedCards) {
             card.getStyleClass().remove("event-selected");
-            Object data = card.getUserData();
-            if (data instanceof CalendarEvent && isSameOccurrence(selectedEvent, (CalendarEvent) data)) {
+            if (cardContainsOccurrence(card.getUserData(), selectedEvent)) {
                 card.getStyleClass().add("event-selected");
             }
         }
+    }
+
+    private boolean cardContainsOccurrence(Object userData, CalendarEvent target) {
+        if (target == null || userData == null) {
+            return false;
+        }
+        if (userData instanceof CalendarEvent) {
+            return isSameOccurrence(target, (CalendarEvent) userData);
+        }
+        if (userData instanceof List<?>) {
+            for (Object item : (List<?>) userData) {
+                if (item instanceof CalendarEvent && isSameOccurrence(target, (CalendarEvent) item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean isSameOccurrence(CalendarEvent a, CalendarEvent b) {
@@ -422,55 +445,178 @@ public class WeekGridView extends VBox {
     }
 
     private void layoutDaySlices(StackPane column, Pane layer, List<DaySlice> slices, LocalDate day) {
+        if (slices.isEmpty()) {
+            return;
+        }
         double colWidth = column.getWidth();
         if (colWidth <= 0) {
             colWidth = 120.0;
         }
 
-        //assigns side-by-side lane indices when events overlap in the same day
-        List<Long> laneEnds = new ArrayList<>();
+        List<long[]> intervals = new ArrayList<>(slices.size());
         for (DaySlice slice : slices) {
-            int assignedLane = -1;
-            for (int lane = 0; lane < laneEnds.size(); lane++) {
-                if (laneEnds.get(lane) <= slice.startMin) {
-                    assignedLane = lane;
-                    laneEnds.set(lane, slice.endMin);
-                    break;
-                }
-            }
-            if (assignedLane < 0) {
-                assignedLane = laneEnds.size();
-                laneEnds.add(slice.endMin);
-            }
-            slice.lane = assignedLane;
+            intervals.add(new long[]{slice.startMin, slice.endMin});
         }
+        List<CalendarGridMath.ClusterRange> clusters = CalendarGridMath.computeVisualClusters(intervals, hourHeight);
 
-        int totalLanes = Math.max(1, laneEnds.size());
-        for (DaySlice slice : slices) {
-            VBox box = buildEventCard(slice, day);
-            double xGap = 2.0;
-            double laneWidth = (colWidth - xGap * (totalLanes + 1)) / totalLanes;
-            if (laneWidth < 24.0) {
-                laneWidth = 24.0;
+        for (CalendarGridMath.ClusterRange cluster : clusters) {
+            List<DaySlice> clusterSlices = slices.subList(cluster.getStartIndex(), cluster.getEndIndexExclusive());
+            List<CalendarEvent> clusterEvents = new ArrayList<>(clusterSlices.size());
+            for (DaySlice slice : clusterSlices) {
+                clusterEvents.add(slice.event);
             }
-            double x = xGap + slice.lane * (laneWidth + xGap);
-            double y = (slice.startMin / 60.0) * hourHeight;
-            double height = ((slice.endMin - slice.startMin) / 60.0) * hourHeight;
-            if (height < 18.0) {
-                height = 18.0;
+            List<CalendarEvent> immutableGroup = Collections.unmodifiableList(clusterEvents);
+
+            if (CalendarGridMath.shouldCollapseCluster(clusterSlices.size(), colWidth)) {
+                VBox stackBox = buildStackCard(cluster, immutableGroup, colWidth);
+                renderedCards.add(stackBox);
+                layer.getChildren().add(stackBox);
+                continue;
             }
 
-            box.setLayoutX(x);
-            box.setLayoutY(y);
-            box.setPrefWidth(laneWidth);
-            box.setMaxWidth(laneWidth);
-            box.setPrefHeight(height);
-            box.setMaxHeight(height);
-            layer.getChildren().add(box);
+            List<Long> laneEnds = new ArrayList<>();
+            for (DaySlice slice : clusterSlices) {
+                int assignedLane = -1;
+                for (int lane = 0; lane < laneEnds.size(); lane++) {
+                    if (laneEnds.get(lane) <= slice.startMin) {
+                        assignedLane = lane;
+                        laneEnds.set(lane, slice.endMin);
+                        break;
+                    }
+                }
+                if (assignedLane < 0) {
+                    assignedLane = laneEnds.size();
+                    laneEnds.add(slice.endMin);
+                }
+                slice.lane = assignedLane;
+            }
+
+            int totalLanes = Math.max(1, laneEnds.size());
+            for (DaySlice slice : clusterSlices) {
+                double xGap = 2.0;
+                double laneWidth = (colWidth - xGap * (totalLanes + 1)) / totalLanes;
+                if (laneWidth < 24.0) {
+                    laneWidth = 24.0;
+                }
+                double x = xGap + slice.lane * (laneWidth + xGap);
+                double y = (slice.startMin / 60.0) * hourHeight;
+                double height = ((slice.endMin - slice.startMin) / 60.0) * hourHeight;
+                if (height < CalendarGridMath.MIN_EVENT_CARD_HEIGHT_PX) {
+                    height = CalendarGridMath.MIN_EVENT_CARD_HEIGHT_PX;
+                }
+
+                VBox box = buildEventCard(slice, day, height, immutableGroup);
+                box.setLayoutX(x);
+                box.setLayoutY(y);
+                box.setMinHeight(0.0);
+                box.setPrefWidth(laneWidth);
+                box.setMaxWidth(laneWidth);
+                box.setPrefHeight(height);
+                box.setMaxHeight(height);
+                applyCardClip(box);
+                layer.getChildren().add(box);
+            }
         }
     }
 
-    private VBox buildEventCard(DaySlice slice, LocalDate day) {
+    private VBox buildStackCard(CalendarGridMath.ClusterRange cluster,
+                                List<CalendarEvent> clusterEvents,
+                                double colWidth) {
+        double x = 2.0;
+        double width = Math.max(36.0, colWidth - 4.0);
+        double y = (cluster.getStartMin() / 60.0) * hourHeight;
+        double height = ((cluster.getEndMin() - cluster.getStartMin()) / 60.0) * hourHeight;
+        if (height < CalendarGridMath.MIN_EVENT_CARD_HEIGHT_PX) {
+            height = CalendarGridMath.MIN_EVENT_CARD_HEIGHT_PX;
+        }
+
+        VBox box = new VBox(2);
+        box.setUserData(clusterEvents);
+        box.getStyleClass().addAll("event-block", "event-stack-block");
+        for (CalendarEvent event : clusterEvents) {
+            if (isSameOccurrence(selectedEvent, event)) {
+                box.getStyleClass().add("event-selected");
+                break;
+            }
+        }
+
+        Label countBadge = new Label(clusterEvents.size() + " events");
+        countBadge.getStyleClass().add("event-stack-badge");
+        countBadge.setMinWidth(Region.USE_PREF_SIZE);
+
+        String spanText = CalendarGridMath.minutesToTime((int) cluster.getStartMin()).format(TIME_FORMAT)
+                + "-" + CalendarGridMath.minutesToTime((int) cluster.getEndMin()).format(TIME_FORMAT);
+
+        if (height < 38.0) {
+            Label compactTitle = new Label(clusterEvents.get(0).getTitle());
+            compactTitle.getStyleClass().add("event-title");
+            compactTitle.setWrapText(false);
+            compactTitle.setMinWidth(0.0);
+            HBox topRow = new HBox(5, countBadge, compactTitle);
+            topRow.setAlignment(Pos.CENTER_LEFT);
+            box.getChildren().add(topRow);
+        } else {
+            Label spanLabel = new Label(spanText);
+            spanLabel.getStyleClass().add("event-time");
+            spanLabel.setMinWidth(0.0);
+            HBox topRow = new HBox(5, countBadge, spanLabel);
+            topRow.setAlignment(Pos.CENTER_LEFT);
+
+            int extraCount = clusterEvents.size() - 1;
+            Label previewTitle = new Label(clusterEvents.get(0).getTitle() + " (+" + extraCount + " more)");
+            previewTitle.getStyleClass().add("event-title");
+            previewTitle.setWrapText(false);
+            box.getChildren().addAll(topRow, previewTitle);
+        }
+
+        StringBuilder tip = new StringBuilder();
+        for (CalendarEvent event : clusterEvents) {
+            if (tip.length() > 0) {
+                tip.append('\n');
+            }
+            tip.append(event.getStartTime().format(TIME_FORMAT))
+                    .append('-')
+                    .append(event.getEndTime().format(TIME_FORMAT))
+                    .append(' ')
+                    .append(event.getTitle());
+        }
+        tip.append("\n\nClick to view & manage all on the right");
+        Tooltip.install(box, new Tooltip(tip.toString()));
+
+        box.setLayoutX(x);
+        box.setLayoutY(y);
+        box.setMinHeight(0.0);
+        box.setPrefWidth(width);
+        box.setMaxWidth(width);
+        box.setPrefHeight(height);
+        box.setMaxHeight(height);
+        applyCardClip(box);
+
+        box.setOnMouseClicked(ev -> {
+            if (ev.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            ev.consume();
+            if (onEventGroupSelected != null) {
+                onEventGroupSelected.accept(clusterEvents);
+            } else if (onEventSelected != null && !clusterEvents.isEmpty()) {
+                onEventSelected.accept(clusterEvents.get(0));
+            }
+        });
+        return box;
+    }
+
+    private void applyCardClip(Region card) {
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(card.widthProperty());
+        clip.heightProperty().bind(card.heightProperty());
+        card.setClip(clip);
+    }
+
+    private VBox buildEventCard(DaySlice slice,
+                                LocalDate day,
+                                double cardHeight,
+                                List<CalendarEvent> clusterEvents) {
         CalendarEvent event = slice.event;
         boolean canDragTiming = event.getId() > 0
                 && event.getStartTime().toLocalDate().equals(event.getEndTime().toLocalDate());
@@ -483,15 +629,21 @@ public class WeekGridView extends VBox {
             box.getStyleClass().add("event-selected");
         }
 
-        Label title = new Label(event.getTitle());
-        title.getStyleClass().add("event-title");
-        title.setWrapText(true);
-
         String timeRange = event.getStartTime().format(TIME_FORMAT) + "-" + event.getEndTime().format(TIME_FORMAT);
         Label timeLabel = new Label(timeRange);
         timeLabel.getStyleClass().add("event-time");
 
-        box.getChildren().addAll(title, timeLabel);
+        if (cardHeight < 34.0) {
+            Label compactLabel = new Label(event.getTitle() + " · " + timeRange);
+            compactLabel.getStyleClass().add("event-title");
+            compactLabel.setWrapText(false);
+            box.getChildren().add(compactLabel);
+        } else {
+            Label title = new Label(event.getTitle());
+            title.getStyleClass().add("event-title");
+            title.setWrapText(true);
+            box.getChildren().addAll(title, timeLabel);
+        }
 
         String hint = "double-click to edit";
         if (canDragTiming) {
@@ -501,12 +653,17 @@ public class WeekGridView extends VBox {
         }
         Tooltip.install(box, new Tooltip(event.getTitle() + " (" + timeRange + ") — " + hint));
 
-        installCardMouseInteractions(box, timeLabel, slice, day, canDragTiming);
+        installCardMouseInteractions(box, timeLabel, slice, day, canDragTiming, clusterEvents);
         renderedCards.add(box);
         return box;
     }
 
-    private void installCardMouseInteractions(VBox box, Label timeLabel, DaySlice slice, LocalDate day, boolean canDragTiming) {
+    private void installCardMouseInteractions(VBox box,
+                                              Label timeLabel,
+                                              DaySlice slice,
+                                              LocalDate day,
+                                              boolean canDragTiming,
+                                              List<CalendarEvent> clusterEvents) {
         CalendarEvent event = slice.event;
         final boolean[] resizing = new boolean[]{false};
         final boolean[] moved = new boolean[]{false};
@@ -589,7 +746,12 @@ public class WeekGridView extends VBox {
                 }
                 return;
             }
-            if (onEventSelected != null) {
+            if (clusterEvents != null && clusterEvents.size() > 1 && onEventGroupSelected != null) {
+                if (onEventSelected != null) {
+                    onEventSelected.accept(event);
+                }
+                onEventGroupSelected.accept(clusterEvents);
+            } else if (onEventSelected != null) {
                 onEventSelected.accept(event);
             }
             if (ev.getClickCount() == 2 && onEventEditRequested != null) {

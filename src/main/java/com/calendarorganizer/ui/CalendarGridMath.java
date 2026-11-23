@@ -1,6 +1,8 @@
 package com.calendarorganizer.ui;
 
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class CalendarGridMath {
 
@@ -9,6 +11,38 @@ public final class CalendarGridMath {
     public static final double DEFAULT_HOUR_HEIGHT = 48.0;
     public static final int MAX_DAY_MINUTE = 23 * 60 + 59;
     public static final int MIN_DURATION_MINUTES = 15;
+    public static final double MIN_EVENT_CARD_HEIGHT_PX = 22.0;
+    public static final double MIN_SIDE_BY_SIDE_LANE_WIDTH_PX = 54.0;
+
+    public static final class ClusterRange {
+        private final int startIndex;
+        private final int endIndexExclusive;
+        private final long startMin;
+        private final long endMin;
+
+        public ClusterRange(int startIndex, int endIndexExclusive, long startMin, long endMin) {
+            this.startIndex = startIndex;
+            this.endIndexExclusive = endIndexExclusive;
+            this.startMin = startMin;
+            this.endMin = endMin;
+        }
+
+        public int getStartIndex() {
+            return startIndex;
+        }
+
+        public int getEndIndexExclusive() {
+            return endIndexExclusive;
+        }
+
+        public long getStartMin() {
+            return startMin;
+        }
+
+        public long getEndMin() {
+            return endMin;
+        }
+    }
 
     private CalendarGridMath() {
     }
@@ -71,5 +105,60 @@ public final class CalendarGridMath {
             startMin = Math.max(0, endMin - 60);
         }
         return new int[]{startMin, endMin};
+    }
+
+    public static long minVisualSpanMinutes(double hourHeight) {
+        double safeHourHeight = clampHourHeight(hourHeight);
+        long span = (long) Math.ceil((MIN_EVENT_CARD_HEIGHT_PX / safeHourHeight) * 60.0);
+        return Math.max(MIN_DURATION_MINUTES, span);
+    }
+
+    public static List<ClusterRange> computeVisualClusters(List<long[]> sortedStartEndMinutes, double hourHeight) {
+        if (sortedStartEndMinutes == null || sortedStartEndMinutes.isEmpty()) {
+            return List.of();
+        }
+        long minVisualSpan = minVisualSpanMinutes(hourHeight);
+        List<ClusterRange> clusters = new ArrayList<>();
+
+        int n = sortedStartEndMinutes.size();
+        int clusterStartIdx = 0;
+        long[] first = sortedStartEndMinutes.get(0);
+        long clusterStartMin = first[0];
+        long clusterLogicalEnd = Math.max(first[0], first[1]);
+        long clusterVisualEnd = Math.max(clusterLogicalEnd, clusterStartMin + minVisualSpan);
+
+        for (int j = 1; j < n; j++) {
+            long[] next = sortedStartEndMinutes.get(j);
+            long nextStart = next[0];
+            long nextEnd = Math.max(next[0], next[1]);
+
+            boolean logicallyOverlaps = nextStart < clusterLogicalEnd;
+            boolean visuallyCollides = nextStart < clusterVisualEnd;
+            boolean hasRoomAbove = (nextStart - clusterStartMin) >= minVisualSpan;
+
+            if (logicallyOverlaps || (visuallyCollides && !hasRoomAbove)) {
+                clusterLogicalEnd = Math.max(clusterLogicalEnd, nextEnd);
+                clusterVisualEnd = Math.max(clusterVisualEnd, Math.max(nextEnd, nextStart + minVisualSpan));
+            } else {
+                clusters.add(new ClusterRange(clusterStartIdx, j, clusterStartMin, clusterLogicalEnd));
+                clusterStartIdx = j;
+                clusterStartMin = nextStart;
+                clusterLogicalEnd = nextEnd;
+                clusterVisualEnd = Math.max(clusterLogicalEnd, clusterStartMin + minVisualSpan);
+            }
+        }
+        clusters.add(new ClusterRange(clusterStartIdx, n, clusterStartMin, clusterLogicalEnd));
+        return clusters;
+    }
+
+    public static boolean shouldCollapseCluster(int eventCount, double columnWidthPx) {
+        if (eventCount <= 1) {
+            return false;
+        }
+        if (eventCount >= 3) {
+            return true;
+        }
+        double laneWidth = (columnWidthPx - 6.0) / 2.0;
+        return laneWidth < MIN_SIDE_BY_SIDE_LANE_WIDTH_PX;
     }
 }
