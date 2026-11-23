@@ -14,6 +14,8 @@ public class CalendarEvent {
     private final EventCategory category;
     private final EventSource source;
     private final String notes;
+    private final long calendarId;
+    private final EventColor color;
 
     public CalendarEvent(long id,
                          String uid,
@@ -23,6 +25,19 @@ public class CalendarEvent {
                          EventCategory category,
                          EventSource source,
                          String notes) {
+        this(id, uid, title, startTime, endTime, category, source, notes, 1L, EventColor.DEFAULT);
+    }
+
+    public CalendarEvent(long id,
+                         String uid,
+                         String title,
+                         LocalDateTime startTime,
+                         LocalDateTime endTime,
+                         EventCategory category,
+                         EventSource source,
+                         String notes,
+                         long calendarId,
+                         EventColor color) {
         this.id = id;
         this.uid = ensureUid(uid);
         this.title = Objects.requireNonNull(title, "title");
@@ -43,6 +58,16 @@ public class CalendarEvent {
         } else {
             this.notes = notes;
         }
+        if (calendarId <= 0L) {
+            this.calendarId = 1L;
+        } else {
+            this.calendarId = calendarId;
+        }
+        if (color == null) {
+            this.color = EventColor.DEFAULT;
+        } else {
+            this.color = color;
+        }
     }
 
     public static CalendarEvent create(String title,
@@ -50,7 +75,7 @@ public class CalendarEvent {
                                        LocalDateTime endTime,
                                        EventCategory category,
                                        EventSource source) {
-        return new CalendarEvent(0L, null, title, startTime, endTime, category, source, "");
+        return new CalendarEvent(0L, null, title, startTime, endTime, category, source, "", 1L, EventColor.DEFAULT);
     }
 
     private static String ensureUid(String rawUid) {
@@ -61,7 +86,15 @@ public class CalendarEvent {
     }
 
     public CalendarEvent withId(long newId) {
-        return new CalendarEvent(newId, uid, title, startTime, endTime, category, source, notes);
+        return new CalendarEvent(newId, uid, title, startTime, endTime, category, source, notes, calendarId, color);
+    }
+
+    public CalendarEvent withCalendarId(long newCalendarId) {
+        return new CalendarEvent(id, uid, title, startTime, endTime, category, source, notes, newCalendarId, color);
+    }
+
+    public CalendarEvent withColor(EventColor newColor) {
+        return new CalendarEvent(id, uid, title, startTime, endTime, category, source, notes, calendarId, newColor);
     }
 
     public long getId() {
@@ -94,5 +127,13 @@ public class CalendarEvent {
 
     public String getNotes() {
         return notes;
+    }
+
+    public long getCalendarId() {
+        return calendarId;
+    }
+
+    public EventColor getColor() {
+        return color;
     }
 }

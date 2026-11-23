@@ -21,6 +21,9 @@ public class RecurringRule {
     private final EventCategory category;
     private final LocalDate startDate;
     private final LocalDate endDate;
+    private final long calendarId;
+    private final EventColor color;
+    private final String notes;
 
     public RecurringRule(long id,
                          String title,
@@ -30,6 +33,20 @@ public class RecurringRule {
                          EventCategory category,
                          LocalDate startDate,
                          LocalDate endDate) {
+        this(id, title, daysOfWeek, startTime, endTime, category, startDate, endDate, 1L, EventColor.DEFAULT, "");
+    }
+
+    public RecurringRule(long id,
+                         String title,
+                         Set<DayOfWeek> daysOfWeek,
+                         LocalTime startTime,
+                         LocalTime endTime,
+                         EventCategory category,
+                         LocalDate startDate,
+                         LocalDate endDate,
+                         long calendarId,
+                         EventColor color,
+                         String notes) {
         this.id = id;
         this.title = Objects.requireNonNull(title, "title");
         if (daysOfWeek == null || daysOfWeek.isEmpty()) {
@@ -46,10 +63,33 @@ public class RecurringRule {
         }
         this.startDate = startDate;
         this.endDate = endDate;
+        if (calendarId <= 0L) {
+            this.calendarId = 1L;
+        } else {
+            this.calendarId = calendarId;
+        }
+        if (color == null) {
+            this.color = EventColor.DEFAULT;
+        } else {
+            this.color = color;
+        }
+        if (notes == null) {
+            this.notes = "";
+        } else {
+            this.notes = notes;
+        }
     }
 
     public RecurringRule withId(long newId) {
-        return new RecurringRule(newId, title, daysOfWeek, startTime, endTime, category, startDate, endDate);
+        return new RecurringRule(
+                newId, title, daysOfWeek, startTime, endTime, category, startDate, endDate, calendarId, color, notes
+        );
+    }
+
+    public RecurringRule withCalendarId(long newCalendarId) {
+        return new RecurringRule(
+                id, title, daysOfWeek, startTime, endTime, category, startDate, endDate, newCalendarId, color, notes
+        );
     }
 
     public List<CalendarEvent> expandForRange(LocalDate from, LocalDate to) {
@@ -95,7 +135,9 @@ public class RecurringRule {
         }
         LocalDateTime end = endDay.atTime(endTime);
         String syntheticUid = "rule-" + id + "-" + date + "@calendar-organizer";
-        return new CalendarEvent(0L, syntheticUid, title, start, end, category, EventSource.RECURRING, "");
+        return new CalendarEvent(
+                0L, syntheticUid, title, start, end, category, EventSource.RECURRING, notes, calendarId, color
+        );
     }
 
     public long getId() {
@@ -128,5 +170,17 @@ public class RecurringRule {
 
     public LocalDate getEndDate() {
         return endDate;
+    }
+
+    public long getCalendarId() {
+        return calendarId;
+    }
+
+    public EventColor getColor() {
+        return color;
+    }
+
+    public String getNotes() {
+        return notes;
     }
 }
