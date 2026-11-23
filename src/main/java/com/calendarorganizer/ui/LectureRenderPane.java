@@ -7,6 +7,7 @@ import com.calendarorganizer.course.CourseManager;
 import com.calendarorganizer.course.CourseSection;
 import com.calendarorganizer.course.CourseSortOrder;
 import com.calendarorganizer.course.LectureRenderModel;
+import com.calendarorganizer.course.PdfRenderService;
 import com.calendarorganizer.service.AppExecutors;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -50,7 +51,7 @@ public class LectureRenderPane extends BorderPane {
     private static final double ZOOM_STEP = 0.15;
     private static final double BASE_ZOOM_WIDTH = 720.0;
     private static final int MAX_TEXT_CACHE_ENTRIES = 8;
-    private static final int MAX_IMAGE_CACHE_ENTRIES = 6;
+    private static final int MAX_IMAGE_CACHE_ENTRIES = 4;
 
     private final CourseManager courseManager;
     private final CourseFilePreviewer previewer;
@@ -103,7 +104,7 @@ public class LectureRenderPane extends BorderPane {
     private boolean zoomFit = true;
     private double zoomFactor = 1.0;
     private boolean updatingPicker;
-    private boolean syncScheduled;
+    private final PauseTransition pickerSyncDebounce = new PauseTransition(Duration.millis(120));
     private boolean fullScreenActive;
 
     private Consumer<Boolean> onFullScreenToggle;
@@ -113,6 +114,7 @@ public class LectureRenderPane extends BorderPane {
     public LectureRenderPane(CourseManager courseManager, CourseFilePreviewer previewer) {
         this.courseManager = courseManager;
         this.previewer = previewer;
+        this.pickerSyncDebounce.setOnFinished(e -> syncPickerToTopVisibleCell());
         getStyleClass().add("render-pane");
 
         setTop(buildToolbar());
@@ -462,14 +464,10 @@ public class LectureRenderPane extends BorderPane {
     }
 
     private void scheduleVisiblePickerSync() {
-        if (syncScheduled || pickerItems.isEmpty()) {
+        if (pickerItems.isEmpty()) {
             return;
         }
-        syncScheduled = true;
-        Platform.runLater(() -> {
-            syncScheduled = false;
-            syncPickerToTopVisibleCell();
-        });
+        pickerSyncDebounce.playFromStart();
     }
 
     private void syncPickerToTopVisibleCell() {
@@ -540,10 +538,58 @@ public class LectureRenderPane extends BorderPane {
 
     public void releaseResources() {
         loadSeq.incrementAndGet();
+        pickerSyncDebounce.stop();
+        for (RenderCell cell : activeCells.keySet()) {
+            if (cell != null) {
+                cell.clearVisualState();
+            }
+        }
         entriesListView.getItems().clear();
         clearLocalTransientCaches();
         setPickerItems(List.of(), Map.of(), 0);
         previewer.clearPdfMemory();
+    }
+
+    private void scheduleNextPdfPagePrefetch(int currentIndex,
+                                              LectureRenderModel.RenderEntry currentEntry,
+                                              int renderWidth,
+                                              long seqSnapshot) {
+        if (currentIndex < 0 || loadSeq.get() != seqSnapshot) {
+            return;
+        }
+        List<LectureRenderModel.RenderEntry> items = entriesListView.getItems();
+        if (currentIndex >= items.size() || items.get(currentIndex) != currentEntry) {
+            return;
+        }
+        int nextIdx = currentIndex + 1;
+        if (nextIdx < items.size() && items.get(nextIdx).getEntryKind() == LectureRenderModel.EntryKind.FILE_HEADER) {
+            nextIdx = nextIdx + 1;
+        }
+        if (nextIdx >= items.size()) {
+            return;
+        }
+        LectureRenderModel.RenderEntry candidate = items.get(nextIdx);
+        if (candidate.getEntryKind() != LectureRenderModel.EntryKind.PDF_PAGE) {
+            return;
+        }
+        Path candidatePath = candidate.getCourseItem().getFilePath();
+        long candidateMtime = candidate.getFileLastModifiedMillis();
+        int candidatePage = candidate.getIndexInFile();
+        if (previewer.getCachedPdfPageFxImage(candidatePath, candidateMtime, candidatePage, renderWidth) != null) {
+            return;
+        }
+        AppExecutors.submitRenderPrefetch(() -> {
+            if (loadSeq.get() != seqSnapshot) {
+                return;
+            }
+            if (previewer.getCachedPdfPageFxImage(candidatePath, candidateMtime, candidatePage, renderWidth) != null) {
+                return;
+            }
+            try {
+                previewer.renderPdfPageFxImage(candidatePath, candidatePage, renderWidth);
+            } catch (Throwable ignored) {
+            }
+        });
     }
 
     private void openExternally(Path path) {
@@ -584,9 +630,11 @@ public class LectureRenderPane extends BorderPane {
         private final Label textBodyLabel = new Label();
         private final VBox textCard = new VBox(6, textTitleLabel, textBodyLabel);
 
-        private long cellTicket;
+        private final AtomicLong cellTicket = new AtomicLong(0L);
+        private volatile boolean cellVisible;
         private LectureRenderModel.RenderEntry boundEntry;
         private int boundRenderWidth;
+        private int boundWidthBucket;
         private long boundSeq;
 
         RenderCell() {
@@ -613,8 +661,9 @@ public class LectureRenderPane extends BorderPane {
             container.getChildren().setAll(headerBanner, pageCard, textCard);
 
             visibleProperty().addListener((obs, wasVisible, isNowVisible) -> {
+                cellVisible = isNowVisible;
                 if (!isNowVisible) {
-                    cellTicket++;
+                    cellTicket.incrementAndGet();
                     pageImageView.setImage(null);
                 } else if (boundEntry != null && !isEmpty()) {
                     loadVisibleContentIfNeeded();
@@ -622,19 +671,33 @@ public class LectureRenderPane extends BorderPane {
             });
             parentProperty().addListener((obs, oldParent, newParent) -> {
                 if (newParent == null) {
-                    cellTicket++;
+                    cellTicket.incrementAndGet();
+                    cellVisible = false;
                     pageImageView.setImage(null);
+                } else {
+                    cellVisible = isVisible();
                 }
             });
+        }
+
+        void clearVisualState() {
+            cellTicket.incrementAndGet();
+            cellVisible = false;
+            boundEntry = null;
+            boundRenderWidth = 0;
+            boundWidthBucket = 0;
+            pageImageView.setImage(null);
         }
 
         @Override
         protected void updateItem(LectureRenderModel.RenderEntry entry, boolean empty) {
             super.updateItem(entry, empty);
-            cellTicket++;
             if (empty || entry == null) {
+                cellTicket.incrementAndGet();
+                cellVisible = false;
                 boundEntry = null;
                 boundRenderWidth = 0;
+                boundWidthBucket = 0;
                 pageImageView.setImage(null);
                 setGraphic(null);
                 return;
@@ -642,9 +705,28 @@ public class LectureRenderPane extends BorderPane {
 
             double targetWidth = computeTargetWidth();
             container.setMaxWidth(targetWidth + 24.0);
+            int nextRenderWidth = (int) Math.round(targetWidth);
+            int nextBucket = PdfRenderService.toWidthBucket(nextRenderWidth);
             long seqSnapshot = loadSeq.get();
+            cellVisible = isVisible();
+
+            if (entry.getEntryKind() == LectureRenderModel.EntryKind.PDF_PAGE
+                    && entry == boundEntry
+                    && boundSeq == seqSnapshot
+                    && nextBucket == boundWidthBucket
+                    && pageImageView.getImage() != null
+                    && !pageLoadingHint.isVisible()) {
+                boundRenderWidth = nextRenderWidth;
+                showCard(pageCard);
+                applyPdfGeometry(targetWidth, entry);
+                setGraphic(container);
+                return;
+            }
+
+            cellTicket.incrementAndGet();
             boundEntry = entry;
-            boundRenderWidth = (int) Math.round(targetWidth);
+            boundRenderWidth = nextRenderWidth;
+            boundWidthBucket = nextBucket;
             boundSeq = seqSnapshot;
 
             switch (entry.getEntryKind()) {
@@ -660,27 +742,36 @@ public class LectureRenderPane extends BorderPane {
                     break;
                 case PDF_PAGE:
                     showCard(pageCard);
-                    double pdfHeight = Math.max(120.0, targetWidth * entry.getAspectRatio());
-                    pageFrame.setMinSize(targetWidth, pdfHeight);
-                    pageFrame.setPrefSize(targetWidth, pdfHeight);
-                    pageFrame.setMaxSize(targetWidth, pdfHeight);
-                    pageImageView.setFitWidth(targetWidth);
-                    pageImageView.setFitHeight(pdfHeight);
-                    pageTitleLabel.setText(entry.getTitle());
+                    applyPdfGeometry(targetWidth, entry);
 
+                    Path pdfPath = entry.getCourseItem().getFilePath();
+                    long pdfMtime = entry.getFileLastModifiedMillis();
                     WritableImage cached = previewer.getCachedPdfPageFxImage(
-                            entry.getCourseItem().getFilePath(),
+                            pdfPath,
+                            pdfMtime,
                             entry.getIndexInFile(),
                             boundRenderWidth
                     );
                     if (cached != null) {
                         pageLoadingHint.setVisible(false);
                         pageImageView.setImage(cached);
+                        scheduleNextPdfPagePrefetch(getIndex(), entry, boundRenderWidth, seqSnapshot);
                     } else {
-                        pageImageView.setImage(null);
-                        pageLoadingHint.setText("Rendering page " + (entry.getIndexInFile() + 1) + "...");
-                        pageLoadingHint.setVisible(true);
-                        if (isVisible()) {
+                        WritableImage fallback = previewer.getClosestCachedPdfPageFxImage(
+                                pdfPath,
+                                pdfMtime,
+                                entry.getIndexInFile(),
+                                boundRenderWidth
+                        );
+                        if (fallback != null) {
+                            pageLoadingHint.setVisible(false);
+                            pageImageView.setImage(fallback);
+                        } else {
+                            pageImageView.setImage(null);
+                            pageLoadingHint.setText("Rendering page " + (entry.getIndexInFile() + 1) + "...");
+                            pageLoadingHint.setVisible(true);
+                        }
+                        if (cellVisible) {
                             loadVisibleContentIfNeeded();
                         }
                     }
@@ -703,7 +794,7 @@ public class LectureRenderPane extends BorderPane {
                         pageImageView.setImage(null);
                         pageLoadingHint.setText("Loading image...");
                         pageLoadingHint.setVisible(true);
-                        if (isVisible()) {
+                        if (cellVisible) {
                             loadVisibleContentIfNeeded();
                         }
                     }
@@ -713,7 +804,11 @@ public class LectureRenderPane extends BorderPane {
                     showCard(textCard);
                     configureTextCardGeometry(targetWidth);
                     textTitleLabel.setText(entry.getTitle());
-                    textBodyLabel.setText(entry.getDetailText() != null ? entry.getDetailText() : "");
+                    if (entry.getDetailText() != null) {
+                        textBodyLabel.setText(entry.getDetailText());
+                    } else {
+                        textBodyLabel.setText("");
+                    }
                     break;
                 case TEXT_DOC:
                     pageImageView.setImage(null);
@@ -726,7 +821,7 @@ public class LectureRenderPane extends BorderPane {
                         textBodyLabel.setText(cachedText);
                     } else {
                         textBodyLabel.setText("Loading text...");
-                        if (isVisible()) {
+                        if (cellVisible) {
                             loadVisibleContentIfNeeded();
                         }
                     }
@@ -737,11 +832,25 @@ public class LectureRenderPane extends BorderPane {
                     showCard(textCard);
                     configureTextCardGeometry(targetWidth);
                     textTitleLabel.setText(entry.getTitle());
-                    textBodyLabel.setText(entry.getDetailText() != null ? entry.getDetailText() : "");
+                    if (entry.getDetailText() != null) {
+                        textBodyLabel.setText(entry.getDetailText());
+                    } else {
+                        textBodyLabel.setText("");
+                    }
                     break;
             }
 
             setGraphic(container);
+        }
+
+        private void applyPdfGeometry(double targetWidth, LectureRenderModel.RenderEntry entry) {
+            double pdfHeight = Math.max(120.0, targetWidth * entry.getAspectRatio());
+            pageFrame.setMinSize(targetWidth, pdfHeight);
+            pageFrame.setPrefSize(targetWidth, pdfHeight);
+            pageFrame.setMaxSize(targetWidth, pdfHeight);
+            pageImageView.setFitWidth(targetWidth);
+            pageImageView.setFitHeight(pdfHeight);
+            pageTitleLabel.setText(entry.getTitle());
         }
 
         private void loadVisibleContentIfNeeded() {
@@ -753,36 +862,48 @@ public class LectureRenderPane extends BorderPane {
             }
             switch (entry.getEntryKind()) {
                 case PDF_PAGE:
-                    if (pageImageView.getImage() != null || renderWidth <= 0) {
+                    if (renderWidth <= 0) {
                         return;
                     }
                     Path pdfPath = entry.getCourseItem().getFilePath();
-                    WritableImage cached = previewer.getCachedPdfPageFxImage(pdfPath, entry.getIndexInFile(), renderWidth);
+                    long pdfMtime = entry.getFileLastModifiedMillis();
+                    WritableImage cached = previewer.getCachedPdfPageFxImage(pdfPath, pdfMtime, entry.getIndexInFile(), renderWidth);
                     if (cached != null) {
                         pageLoadingHint.setVisible(false);
-                        pageImageView.setImage(cached);
+                        if (pageImageView.getImage() != cached) {
+                            pageImageView.setImage(cached);
+                        }
+                        scheduleNextPdfPagePrefetch(getIndex(), entry, renderWidth, seqSnapshot);
                         return;
                     }
-                    long pdfTicket = ++cellTicket;
+                    if (pageImageView.getImage() == null) {
+                        WritableImage fallback = previewer.getClosestCachedPdfPageFxImage(pdfPath, pdfMtime, entry.getIndexInFile(), renderWidth);
+                        if (fallback != null) {
+                            pageLoadingHint.setVisible(false);
+                            pageImageView.setImage(fallback);
+                        }
+                    }
+                    long pdfTicket = cellTicket.incrementAndGet();
                     AppExecutors.renderExecutor().execute(() -> {
-                        if (loadSeq.get() != seqSnapshot || cellTicket != pdfTicket || !isVisible()) {
+                        if (loadSeq.get() != seqSnapshot || cellTicket.get() != pdfTicket || !cellVisible) {
                             return;
                         }
                         try {
                             WritableImage img = previewer.renderPdfPageFxImage(pdfPath, entry.getIndexInFile(), renderWidth);
                             Platform.runLater(() -> {
-                                if (cellTicket == pdfTicket
+                                if (cellTicket.get() == pdfTicket
                                         && loadSeq.get() == seqSnapshot
                                         && !isEmpty()
                                         && isVisible()
                                         && getItem() == entry) {
                                     pageLoadingHint.setVisible(false);
                                     pageImageView.setImage(img);
+                                    scheduleNextPdfPagePrefetch(getIndex(), entry, renderWidth, seqSnapshot);
                                 }
                             });
                         } catch (Throwable ex) {
                             Platform.runLater(() -> {
-                                if (cellTicket == pdfTicket
+                                if (cellTicket.get() == pdfTicket
                                         && loadSeq.get() == seqSnapshot
                                         && !isEmpty()
                                         && getItem() == entry) {
@@ -804,16 +925,16 @@ public class LectureRenderPane extends BorderPane {
                         pageImageView.setImage(cachedImg);
                         return;
                     }
-                    long imgTicket = ++cellTicket;
+                    long imgTicket = cellTicket.incrementAndGet();
                     AppExecutors.renderExecutor().execute(() -> {
-                        if (loadSeq.get() != seqSnapshot || cellTicket != imgTicket || !isVisible()) {
+                        if (loadSeq.get() != seqSnapshot || cellTicket.get() != imgTicket || !cellVisible) {
                             return;
                         }
                         try (InputStream is = Files.newInputStream(imgPath)) {
-                            Image loaded = new Image(is, 1000, 0, true, true);
+                            Image loaded = new Image(is, 900, 0, true, true);
                             imageCache.put(imgPath, loaded);
                             Platform.runLater(() -> {
-                                if (cellTicket == imgTicket
+                                if (cellTicket.get() == imgTicket
                                         && loadSeq.get() == seqSnapshot
                                         && !isEmpty()
                                         && isVisible()
@@ -824,7 +945,7 @@ public class LectureRenderPane extends BorderPane {
                             });
                         } catch (IOException ex) {
                             Platform.runLater(() -> {
-                                if (cellTicket == imgTicket
+                                if (cellTicket.get() == imgTicket
                                         && loadSeq.get() == seqSnapshot
                                         && !isEmpty()
                                         && getItem() == entry) {
@@ -842,16 +963,16 @@ public class LectureRenderPane extends BorderPane {
                         textBodyLabel.setText(cachedText);
                         return;
                     }
-                    long textTicket = ++cellTicket;
+                    long textTicket = cellTicket.incrementAndGet();
                     AppExecutors.ioExecutor().execute(() -> {
-                        if (loadSeq.get() != seqSnapshot || cellTicket != textTicket || !isVisible()) {
+                        if (loadSeq.get() != seqSnapshot || cellTicket.get() != textTicket || !cellVisible) {
                             return;
                         }
                         try {
                             String content = previewer.extractTextPreview(textPath);
                             textCache.put(textPath, content);
                             Platform.runLater(() -> {
-                                if (cellTicket == textTicket
+                                if (cellTicket.get() == textTicket
                                         && loadSeq.get() == seqSnapshot
                                         && !isEmpty()
                                         && isVisible()
@@ -861,7 +982,7 @@ public class LectureRenderPane extends BorderPane {
                             });
                         } catch (IOException ex) {
                             Platform.runLater(() -> {
-                                if (cellTicket == textTicket
+                                if (cellTicket.get() == textTicket
                                         && loadSeq.get() == seqSnapshot
                                         && !isEmpty()
                                         && getItem() == entry) {

@@ -54,18 +54,25 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public class CourseTabView extends BorderPane {
 
+    private static final String RENDER_PAUSED_NOTICE =
+            "Viewing in the Render pane on the right.\n\n"
+                    + "Select a Markdown note to edit alongside it, or click Close Render to preview this PDF here.";
+
     private final CourseManager courseManager;
     private final CourseExporter courseExporter;
-    private final CourseFilePreviewer previewer = new CourseFilePreviewer();
+    private final CourseFilePreviewer previewer;
     private final AtomicLong coursesRequestSeq = new AtomicLong(0L);
     private final AtomicLong itemsRequestSeq = new AtomicLong(0L);
     private final AtomicLong previewRequestSeq = new AtomicLong(0L);
+    private final Map<PdfPageCell, Boolean> activePdfCells = new WeakHashMap<>();
 
     private final SplitPane splitPane;
     private final VBox coursesRail;
@@ -124,8 +131,19 @@ public class CourseTabView extends BorderPane {
     private Runnable onRenderRequested;
 
     public CourseTabView(CourseManager courseManager, CourseExporter courseExporter) {
+        this(courseManager, courseExporter, new CourseFilePreviewer());
+    }
+
+    public CourseTabView(CourseManager courseManager,
+                         CourseExporter courseExporter,
+                         CourseFilePreviewer sharedPreviewer) {
         this.courseManager = courseManager;
         this.courseExporter = courseExporter;
+        if (sharedPreviewer != null) {
+            this.previewer = sharedPreviewer;
+        } else {
+            this.previewer = new CourseFilePreviewer();
+        }
 
         this.coursesRail = buildCoursesPane();
         VBox filesPane = buildSectionFilesPane();
@@ -373,142 +391,266 @@ public class CourseTabView extends BorderPane {
 
     private void configurePdfPagesListView() {
         pdfPagesListView.getStyleClass().add("pdf-pages-list");
-        pdfPagesListView.setCellFactory(list -> new ListCell<>() {
-            private final Label pageLabel = new Label();
-            private final Label loadingHint = new Label();
-            private final ImageView pageImage = new ImageView();
-            private final StackPane imageFrame = new StackPane(loadingHint, pageImage);
-            private final VBox cellBox = new VBox(4, pageLabel, imageFrame);
-            private long cellTicket;
-            private PdfPageSlot boundSlot;
-            private int boundRenderWidth;
-
-            {
-                pageLabel.getStyleClass().add("dim-label");
-                loadingHint.getStyleClass().add("dim-label");
-                pageImage.setPreserveRatio(true);
-                pageImage.setSmooth(true);
-                imageFrame.getStyleClass().add("pdf-page-frame");
-                imageFrame.setAlignment(Pos.CENTER);
-                cellBox.setAlignment(Pos.TOP_CENTER);
-
-                visibleProperty().addListener((obs, wasVisible, isNowVisible) -> {
-                    if (!isNowVisible) {
-                        cellTicket++;
-                        pageImage.setImage(null);
-                    } else if (boundSlot != null && !isEmpty()) {
-                        startVisibleRenderIfNeeded();
-                    }
-                });
-                parentProperty().addListener((obs, oldParent, newParent) -> {
-                    if (newParent == null) {
-                        cellTicket++;
-                        pageImage.setImage(null);
-                    }
-                });
-            }
-
-            @Override
-            protected void updateItem(PdfPageSlot slot, boolean empty) {
-                super.updateItem(slot, empty);
-                cellTicket++;
-                if (empty || slot == null) {
-                    boundSlot = null;
-                    boundRenderWidth = 0;
-                    pageImage.setImage(null);
-                    setGraphic(null);
-                    return;
-                }
-
-                double targetWidth = computePdfSlotTargetWidth();
-                double targetHeight = Math.max(120.0, targetWidth * slot.aspectRatio);
-                imageFrame.setMinSize(targetWidth, targetHeight);
-                imageFrame.setPrefSize(targetWidth, targetHeight);
-                imageFrame.setMaxSize(targetWidth, targetHeight);
-                pageImage.setFitWidth(targetWidth);
-                pageImage.setFitHeight(targetHeight);
-                pageLabel.setText("Page " + (slot.pageIndex + 1) + " / " + slot.totalPages);
-
-                boundSlot = slot;
-                boundRenderWidth = (int) Math.round(targetWidth);
-                setGraphic(cellBox);
-
-                WritableImage cached = previewer.getCachedPdfPageFxImage(slot.pdfPath, slot.pageIndex, boundRenderWidth);
-                if (cached != null) {
-                    loadingHint.setVisible(false);
-                    pageImage.setImage(cached);
-                } else {
-                    pageImage.setImage(null);
-                    loadingHint.setText("Loading page " + (slot.pageIndex + 1) + "...");
-                    loadingHint.setVisible(true);
-                    if (isVisible()) {
-                        startVisibleRenderIfNeeded();
-                    }
-                }
-            }
-
-            private void startVisibleRenderIfNeeded() {
-                PdfPageSlot slot = boundSlot;
-                int renderWidth = boundRenderWidth;
-                if (slot == null || renderWidth <= 0 || pageImage.getImage() != null) {
-                    return;
-                }
-                WritableImage cached = previewer.getCachedPdfPageFxImage(slot.pdfPath, slot.pageIndex, renderWidth);
-                if (cached != null) {
-                    loadingHint.setVisible(false);
-                    pageImage.setImage(cached);
-                    return;
-                }
-                long ticket = ++cellTicket;
-                AppExecutors.renderExecutor().execute(() -> {
-                    if (previewRequestSeq.get() != slot.requestId || cellTicket != ticket || !isVisible()) {
-                        return;
-                    }
-                    try {
-                        WritableImage rendered = previewer.renderPdfPageFxImage(slot.pdfPath, slot.pageIndex, renderWidth);
-                        Platform.runLater(() -> {
-                            if (cellTicket == ticket
-                                    && previewRequestSeq.get() == slot.requestId
-                                    && !isEmpty()
-                                    && isVisible()
-                                    && getItem() == slot) {
-                                loadingHint.setVisible(false);
-                                pageImage.setImage(rendered);
-                            }
-                        });
-                    } catch (Throwable ex) {
-                        Platform.runLater(() -> {
-                            if (cellTicket == ticket
-                                    && previewRequestSeq.get() == slot.requestId
-                                    && !isEmpty()
-                                    && getItem() == slot) {
-                                loadingHint.setText("Failed to render page " + (slot.pageIndex + 1));
-                                loadingHint.setVisible(true);
-                            }
-                        });
-                    }
-                });
-            }
+        pdfPagesListView.setCellFactory(list -> {
+            PdfPageCell cell = new PdfPageCell();
+            activePdfCells.put(cell, Boolean.TRUE);
+            return cell;
         });
         pdfPagesListView.addEventFilter(ScrollEvent.SCROLL, ev -> {
             if (ev.isControlDown() && ev.getDeltaY() != 0.0 && activePreviewKind == CourseFilePreviewer.PreviewKind.PDF) {
-                adjustPdfZoom(ev.getDeltaY() > 0 ? 0.15 : -0.15);
+                double delta = -0.15;
+                if (ev.getDeltaY() > 0) {
+                    delta = 0.15;
+                }
+                adjustPdfZoom(delta);
                 ev.consume();
             }
         });
-        PauseTransition resizeDebounce = new PauseTransition(Duration.millis(120));
+        final double[] lastMeasuredWidth = new double[]{-1.0};
+        PauseTransition resizeDebounce = new PauseTransition(Duration.millis(180));
         resizeDebounce.setOnFinished(e -> {
-            if (pdfZoomFit && pdfPagesListView.isVisible() && !pdfPagesListView.getItems().isEmpty()) {
+            double currentW = pdfPagesListView.getWidth();
+            if (pdfZoomFit
+                    && pdfPagesListView.isVisible()
+                    && !pdfPagesListView.getItems().isEmpty()
+                    && (lastMeasuredWidth[0] < 0.0 || Math.abs(currentW - lastMeasuredWidth[0]) >= 8.0)) {
+                lastMeasuredWidth[0] = currentW;
                 pdfPagesListView.refresh();
             }
         });
         pdfPagesListView.widthProperty().addListener((obs, oldW, newW) -> {
-            if (pdfZoomFit && pdfPagesListView.isVisible() && !pdfPagesListView.getItems().isEmpty()) {
+            double next = newW.doubleValue();
+            if (pdfZoomFit
+                    && pdfPagesListView.isVisible()
+                    && !pdfPagesListView.getItems().isEmpty()
+                    && (lastMeasuredWidth[0] < 0.0 || Math.abs(next - lastMeasuredWidth[0]) >= 8.0)) {
                 resizeDebounce.playFromStart();
             }
         });
         pdfPagesListView.setVisible(false);
         pdfPagesListView.setManaged(false);
+    }
+
+    private void scheduleNextPdfSlotPrefetch(int currentIndex, PdfPageSlot currentSlot, int renderWidth) {
+        if (currentIndex < 0 || previewRequestSeq.get() != currentSlot.requestId) {
+            return;
+        }
+        List<PdfPageSlot> slots = pdfPagesListView.getItems();
+        int nextIndex = currentIndex + 1;
+        if (nextIndex >= slots.size()) {
+            return;
+        }
+        PdfPageSlot nextSlot = slots.get(nextIndex);
+        if (nextSlot == null || nextSlot.requestId != currentSlot.requestId) {
+            return;
+        }
+        if (previewer.getCachedPdfPageFxImage(nextSlot.pdfPath, nextSlot.lastModifiedMillis, nextSlot.pageIndex, renderWidth) != null) {
+            return;
+        }
+        AppExecutors.submitRenderPrefetch(() -> {
+            if (previewRequestSeq.get() != nextSlot.requestId) {
+                return;
+            }
+            if (previewer.getCachedPdfPageFxImage(nextSlot.pdfPath, nextSlot.lastModifiedMillis, nextSlot.pageIndex, renderWidth) != null) {
+                return;
+            }
+            try {
+                previewer.renderPdfPageFxImage(nextSlot.pdfPath, nextSlot.pageIndex, renderWidth);
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
+    private final class PdfPageCell extends ListCell<PdfPageSlot> {
+        private final Label pageLabel = new Label();
+        private final Label loadingHint = new Label();
+        private final ImageView pageImage = new ImageView();
+        private final StackPane imageFrame = new StackPane(loadingHint, pageImage);
+        private final VBox cellBox = new VBox(4, pageLabel, imageFrame);
+        private final AtomicLong cellTicket = new AtomicLong(0L);
+        private volatile boolean cellVisible;
+        private PdfPageSlot boundSlot;
+        private int boundRenderWidth;
+        private int boundWidthBucket;
+
+        PdfPageCell() {
+            pageLabel.getStyleClass().add("dim-label");
+            loadingHint.getStyleClass().add("dim-label");
+            pageImage.setPreserveRatio(true);
+            pageImage.setSmooth(true);
+            imageFrame.getStyleClass().add("pdf-page-frame");
+            imageFrame.setAlignment(Pos.CENTER);
+            cellBox.setAlignment(Pos.TOP_CENTER);
+
+            visibleProperty().addListener((obs, wasVisible, isNowVisible) -> {
+                cellVisible = isNowVisible;
+                if (!isNowVisible) {
+                    cellTicket.incrementAndGet();
+                    pageImage.setImage(null);
+                } else if (boundSlot != null && !isEmpty()) {
+                    startVisibleRenderIfNeeded();
+                }
+            });
+            parentProperty().addListener((obs, oldParent, newParent) -> {
+                if (newParent == null) {
+                    cellTicket.incrementAndGet();
+                    cellVisible = false;
+                    pageImage.setImage(null);
+                } else {
+                    cellVisible = isVisible();
+                }
+            });
+        }
+
+        void clearVisualState() {
+            cellTicket.incrementAndGet();
+            cellVisible = false;
+            boundSlot = null;
+            boundRenderWidth = 0;
+            boundWidthBucket = 0;
+            pageImage.setImage(null);
+        }
+
+        @Override
+        protected void updateItem(PdfPageSlot slot, boolean empty) {
+            super.updateItem(slot, empty);
+            if (empty || slot == null) {
+                cellTicket.incrementAndGet();
+                cellVisible = false;
+                boundSlot = null;
+                boundRenderWidth = 0;
+                boundWidthBucket = 0;
+                pageImage.setImage(null);
+                setGraphic(null);
+                return;
+            }
+
+            double targetWidth = computePdfSlotTargetWidth();
+            double targetHeight = Math.max(120.0, targetWidth * slot.aspectRatio);
+            int nextRenderWidth = (int) Math.round(targetWidth);
+            int nextBucket = PdfRenderService.toWidthBucket(nextRenderWidth);
+            cellVisible = isVisible();
+
+            if (slot == boundSlot
+                    && nextBucket == boundWidthBucket
+                    && pageImage.getImage() != null
+                    && !loadingHint.isVisible()) {
+                boundRenderWidth = nextRenderWidth;
+                applySlotGeometry(targetWidth, targetHeight, slot);
+                setGraphic(cellBox);
+                return;
+            }
+
+            cellTicket.incrementAndGet();
+            boundSlot = slot;
+            boundRenderWidth = nextRenderWidth;
+            boundWidthBucket = nextBucket;
+            applySlotGeometry(targetWidth, targetHeight, slot);
+            setGraphic(cellBox);
+
+            WritableImage cached = previewer.getCachedPdfPageFxImage(
+                    slot.pdfPath,
+                    slot.lastModifiedMillis,
+                    slot.pageIndex,
+                    boundRenderWidth
+            );
+            if (cached != null) {
+                loadingHint.setVisible(false);
+                pageImage.setImage(cached);
+                scheduleNextPdfSlotPrefetch(getIndex(), slot, boundRenderWidth);
+            } else {
+                WritableImage fallback = previewer.getClosestCachedPdfPageFxImage(
+                        slot.pdfPath,
+                        slot.lastModifiedMillis,
+                        slot.pageIndex,
+                        boundRenderWidth
+                );
+                if (fallback != null) {
+                    loadingHint.setVisible(false);
+                    pageImage.setImage(fallback);
+                } else {
+                    pageImage.setImage(null);
+                    loadingHint.setText("Loading page " + (slot.pageIndex + 1) + "...");
+                    loadingHint.setVisible(true);
+                }
+                if (cellVisible) {
+                    startVisibleRenderIfNeeded();
+                }
+            }
+        }
+
+        private void applySlotGeometry(double targetWidth, double targetHeight, PdfPageSlot slot) {
+            imageFrame.setMinSize(targetWidth, targetHeight);
+            imageFrame.setPrefSize(targetWidth, targetHeight);
+            imageFrame.setMaxSize(targetWidth, targetHeight);
+            pageImage.setFitWidth(targetWidth);
+            pageImage.setFitHeight(targetHeight);
+            pageLabel.setText("Page " + (slot.pageIndex + 1) + " / " + slot.totalPages);
+        }
+
+        private void startVisibleRenderIfNeeded() {
+            PdfPageSlot slot = boundSlot;
+            int renderWidth = boundRenderWidth;
+            if (slot == null || renderWidth <= 0 || previewRequestSeq.get() != slot.requestId) {
+                return;
+            }
+            WritableImage cached = previewer.getCachedPdfPageFxImage(
+                    slot.pdfPath,
+                    slot.lastModifiedMillis,
+                    slot.pageIndex,
+                    renderWidth
+            );
+            if (cached != null) {
+                loadingHint.setVisible(false);
+                if (pageImage.getImage() != cached) {
+                    pageImage.setImage(cached);
+                }
+                scheduleNextPdfSlotPrefetch(getIndex(), slot, renderWidth);
+                return;
+            }
+            if (pageImage.getImage() == null) {
+                WritableImage fallback = previewer.getClosestCachedPdfPageFxImage(
+                        slot.pdfPath,
+                        slot.lastModifiedMillis,
+                        slot.pageIndex,
+                        renderWidth
+                );
+                if (fallback != null) {
+                    loadingHint.setVisible(false);
+                    pageImage.setImage(fallback);
+                }
+            }
+            long ticket = cellTicket.incrementAndGet();
+            AppExecutors.renderExecutor().execute(() -> {
+                if (previewRequestSeq.get() != slot.requestId || cellTicket.get() != ticket || !cellVisible) {
+                    return;
+                }
+                try {
+                    WritableImage rendered = previewer.renderPdfPageFxImage(slot.pdfPath, slot.pageIndex, renderWidth);
+                    Platform.runLater(() -> {
+                        if (cellTicket.get() == ticket
+                                && previewRequestSeq.get() == slot.requestId
+                                && !isEmpty()
+                                && isVisible()
+                                && getItem() == slot) {
+                            loadingHint.setVisible(false);
+                            pageImage.setImage(rendered);
+                            scheduleNextPdfSlotPrefetch(getIndex(), slot, renderWidth);
+                        }
+                    });
+                } catch (Throwable ex) {
+                    Platform.runLater(() -> {
+                        if (cellTicket.get() == ticket
+                                && previewRequestSeq.get() == slot.requestId
+                                && !isEmpty()
+                                && getItem() == slot) {
+                            loadingHint.setText("Failed to render page " + (slot.pageIndex + 1));
+                            loadingHint.setVisible(true);
+                        }
+                    });
+                }
+            });
+        }
     }
 
     private void selectSection(CourseSection section) {
@@ -565,6 +707,7 @@ public class CourseTabView extends BorderPane {
     }
 
     public void setRenderOpenState(boolean open) {
+        boolean changed = this.renderOpen != open;
         this.renderOpen = open;
         if (open) {
             renderCourseButton.setText("Close Render");
@@ -572,6 +715,28 @@ public class CourseTabView extends BorderPane {
             renderCourseButton.setText("Render");
         }
         renderCourseButton.setDisable(!open && selectedCourse == null);
+        if (!changed) {
+            return;
+        }
+        if (open) {
+            if (selectedItem != null
+                    && !selectedItem.isMarkdown()
+                    && activePreviewKind == CourseFilePreviewer.PreviewKind.PDF) {
+                previewRequestSeq.incrementAndGet();
+                releasePreviewResources(false);
+                showTextPreviewMode(RENDER_PAUSED_NOTICE);
+            }
+        } else {
+            if (isVisible()
+                    && getParent() != null
+                    && selectedItem != null
+                    && !selectedItem.isMarkdown()
+                    && activePreviewKind == CourseFilePreviewer.PreviewKind.PDF) {
+                long requestId = previewRequestSeq.incrementAndGet();
+                showTextPreviewMode("Loading PDF pages...");
+                requestPdfLazyPreview(selectedItem, requestId);
+            }
+        }
     }
 
     public void setSortOrder(CourseSortOrder order) {
@@ -966,7 +1131,7 @@ public class CourseTabView extends BorderPane {
             pathHeader.setText(item.getRelativeDisplayPath());
             deleteItemButton.setDisable(false);
             openFileButton.setDisable(false);
-            releasePreviewResources();
+            releasePreviewResources(!renderOpen);
 
             if (item.isMarkdown()) {
                 showEditorMode();
@@ -1018,8 +1183,13 @@ public class CourseTabView extends BorderPane {
 
         switch (kind) {
             case PDF:
-                showTextPreviewMode("Loading PDF pages...");
-                requestPdfLazyPreview(item, requestId);
+                if (renderOpen) {
+                    hidePreviewNavBar();
+                    showTextPreviewMode(RENDER_PAUSED_NOTICE);
+                } else {
+                    showTextPreviewMode("Loading PDF pages...");
+                    requestPdfLazyPreview(item, requestId);
+                }
                 break;
             case PPTX:
                 showTextPreviewMode("Loading PowerPoint slides...");
@@ -1052,7 +1222,14 @@ public class CourseTabView extends BorderPane {
                 int total = meta.getPageCount();
                 List<PdfPageSlot> slots = new ArrayList<>(total);
                 for (int i = 0; i < total; i++) {
-                    slots.add(new PdfPageSlot(item.getFilePath(), i, total, meta.getAspectRatio(i), requestId));
+                    slots.add(new PdfPageSlot(
+                            item.getFilePath(),
+                            i,
+                            total,
+                            meta.getAspectRatio(i),
+                            meta.getLastModifiedMillis(),
+                            requestId
+                    ));
                 }
                 Platform.runLater(() -> {
                     if (previewRequestSeq.get() != requestId) {
@@ -1323,6 +1500,11 @@ public class CourseTabView extends BorderPane {
     }
 
     private void releasePreviewResources(boolean clearSharedPdfCache) {
+        for (PdfPageCell cell : activePdfCells.keySet()) {
+            if (cell != null) {
+                cell.clearVisualState();
+            }
+        }
         pdfPagesListView.getItems().clear();
         previewImageView.setImage(null);
         pptxThumbView.setImage(null);
@@ -1351,6 +1533,12 @@ public class CourseTabView extends BorderPane {
 
     public void ensureActivePreviewLoaded() {
         if (selectedItem != null && !selectedItem.isMarkdown()) {
+            if (renderOpen && previewer.detectKind(selectedItem.getFilePath()) == CourseFilePreviewer.PreviewKind.PDF) {
+                activePreviewKind = CourseFilePreviewer.PreviewKind.PDF;
+                hidePreviewNavBar();
+                showTextPreviewMode(RENDER_PAUSED_NOTICE);
+                return;
+            }
             boolean emptyPreview = !pdfPagesListView.isVisible()
                     && !imageScrollPane.isVisible()
                     && (!previewBox.isVisible() || previewTextArea.getText().isEmpty());
@@ -1376,7 +1564,7 @@ public class CourseTabView extends BorderPane {
         loadingEditor = true;
         selectedItem = null;
         pathHeader.setText("No file selected");
-        releasePreviewResources();
+        releasePreviewResources(!renderOpen);
         showEditorMode();
         editor.clear();
         editor.setDisable(true);
@@ -1491,13 +1679,20 @@ public class CourseTabView extends BorderPane {
         final int pageIndex;
         final int totalPages;
         final double aspectRatio;
+        final long lastModifiedMillis;
         final long requestId;
 
-        PdfPageSlot(Path pdfPath, int pageIndex, int totalPages, double aspectRatio, long requestId) {
+        PdfPageSlot(Path pdfPath,
+                    int pageIndex,
+                    int totalPages,
+                    double aspectRatio,
+                    long lastModifiedMillis,
+                    long requestId) {
             this.pdfPath = pdfPath;
             this.pageIndex = pageIndex;
             this.totalPages = totalPages;
             this.aspectRatio = aspectRatio;
+            this.lastModifiedMillis = lastModifiedMillis;
             this.requestId = requestId;
         }
     }

@@ -43,7 +43,7 @@ public class MainWindow extends BorderPane {
     private final CalendarTabView calendarTabView;
     private CourseTabView courseTabView;
     private StudyWorkspaceView studyWorkspaceView;
-    private CourseFilePreviewer workspacePreviewer;
+    private CourseFilePreviewer sharedPreviewer;
     private LectureRenderPane lectureRenderPane;
     private final AtomicLong statsRequestSeq = new AtomicLong(0L);
 
@@ -167,18 +167,19 @@ public class MainWindow extends BorderPane {
     }
 
     private CourseFilePreviewer ensureSharedPreviewer() {
-        if (courseTabView != null) {
-            return courseTabView.getPreviewer();
+        if (sharedPreviewer == null) {
+            if (courseTabView != null) {
+                sharedPreviewer = courseTabView.getPreviewer();
+            } else {
+                sharedPreviewer = new CourseFilePreviewer();
+            }
         }
-        if (workspacePreviewer == null) {
-            workspacePreviewer = new CourseFilePreviewer();
-        }
-        return workspacePreviewer;
+        return sharedPreviewer;
     }
 
     private CourseTabView ensureCourseTabView() {
         if (courseTabView == null) {
-            CourseTabView view = new CourseTabView(courseManager, courseExporter);
+            CourseTabView view = new CourseTabView(courseManager, courseExporter, ensureSharedPreviewer());
             view.setActiveTheme(getResolvedTheme());
             view.setOnStatusChanged(this::updateStatus);
             view.setOnStateChanged(this::refreshCourseFooterUi);
@@ -392,12 +393,12 @@ public class MainWindow extends BorderPane {
             courseTabView.flushPendingEdits();
             courseTabView.releaseTransientCaches(true);
         }
-        if (isRenderPaneOpen()) {
-            closeRenderPane();
-        }
         activeMode = ViewMode.WORKSPACE;
         StudyWorkspaceView view = ensureStudyWorkspaceView();
         mainContentHost.getChildren().setAll(view);
+        if (isRenderPaneOpen()) {
+            closeRenderPane();
+        }
         view.onTabActivated();
         updateModeVisibility();
         statusLabel.setText("Study Workspace ready.");
@@ -447,13 +448,13 @@ public class MainWindow extends BorderPane {
             workspaceSplit.setDividerPositions(savedSplitDivider);
         }
 
+        updateRenderButtonStates();
         lectureRenderPane.loadCourseContext(
                 selectedCourse,
                 view.getSelectedSection(),
                 view.getSelectedItem(),
                 view.getActiveSortOrder()
         );
-        updateRenderButtonStates();
     }
 
     private void closeRenderPane() {
@@ -681,8 +682,8 @@ public class MainWindow extends BorderPane {
         if (courseTabView != null) {
             courseTabView.shutdownPreviewer();
         }
-        if (workspacePreviewer != null) {
-            workspacePreviewer.cleanupAllPdfCaches();
+        if (sharedPreviewer != null) {
+            sharedPreviewer.cleanupAllPdfCaches();
         }
         themeDetector.close();
         AppExecutors.shutdown();
