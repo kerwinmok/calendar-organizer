@@ -155,6 +155,7 @@ public class StudyWorkspaceView extends BorderPane {
         resetLayoutBtn.setOnAction(e -> resetToDefaultLayout());
         paneCountLabel.getStyleClass().add("dim-label");
 
+        fullScreenBtn.setMinWidth(Region.USE_PREF_SIZE);
         fullScreenBtn.setOnAction(e -> {
             if (onFullScreenToggle != null) {
                 onFullScreenToggle.accept(!fullScreenState);

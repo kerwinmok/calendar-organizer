@@ -9,6 +9,7 @@ import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.CalendarService;
 import com.calendarorganizer.storage.StorageStats;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -26,6 +27,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -65,7 +67,6 @@ public class MainWindow extends BorderPane {
     private final TextField courseSearchField = new TextField();
     private final HBox courseCommandBox;
 
-    private final Button autoScheduleBtn = new Button("Auto-Schedule");
     private final MenuButton icsMenuBtn = new MenuButton("ICS");
     private final HBox calendarActionsBox;
 
@@ -90,7 +91,9 @@ public class MainWindow extends BorderPane {
     private double savedSplitDivider = 0.50;
     private boolean renderFullScreen;
     private boolean workspaceFullScreen;
+    private boolean preFullScreenMaximized;
     private boolean fullScreenListenerAttached;
+    private final PauseTransition titleBarAfterFullScreen = new PauseTransition(Duration.millis(140));
 
     public MainWindow(CalendarService calendarService,
                       CourseManager courseManager,
@@ -112,6 +115,7 @@ public class MainWindow extends BorderPane {
 
         this.calendarTabView.setOnStatusChanged(this::updateStatus);
         this.calendarTabView.setOnDataChanged(this::refreshFooter);
+        this.titleBarAfterFullScreen.setOnFinished(e -> applyNativeTitleBar());
 
         this.topBar = buildTopBar();
         this.bottomBar = buildBottomBar();
@@ -128,6 +132,14 @@ public class MainWindow extends BorderPane {
                     ev.consume();
                 } else if (activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
                     setWorkspaceFullScreen(!workspaceFullScreen);
+                    ev.consume();
+                }
+            } else if (ev.getCode() == KeyCode.ESCAPE) {
+                if (renderFullScreen) {
+                    setRenderFullScreen(false);
+                    ev.consume();
+                } else if (workspaceFullScreen) {
+                    setWorkspaceFullScreen(false);
                     ev.consume();
                 }
             }
@@ -243,7 +255,7 @@ public class MainWindow extends BorderPane {
     }
 
     private HBox buildCalendarCommandBox() {
-        sentenceField.setPromptText("Add by sentence: \"i work mon-thurs 7-6pm\" or \"work out and study, sleep at 12\"");
+        sentenceField.setPromptText("Ask Gemini to add/schedule: \"work mon-thurs 7-6pm\" or \"study 2h tomorrow evening\"");
         sentenceField.getStyleClass().add("lc-command-field");
         sentenceField.setPrefWidth(420);
         sentenceField.setMaxWidth(540);
@@ -282,7 +294,6 @@ public class MainWindow extends BorderPane {
     private HBox buildCalendarActionsBox() {
         Button newEventBtn = new Button("+ Event");
         newEventBtn.setOnAction(e -> calendarTabView.openNewEventDialogDefault());
-        autoScheduleBtn.setOnAction(e -> calendarTabView.rescheduleCurrentWeek());
 
         MenuItem importFileItem = new MenuItem("Import .ics File...");
         importFileItem.setOnAction(e -> calendarTabView.importIcsFile());
@@ -292,7 +303,7 @@ public class MainWindow extends BorderPane {
         exportIcsItem.setOnAction(e -> calendarTabView.exportIcsFile());
         icsMenuBtn.getItems().setAll(importFileItem, pasteIcsItem, exportIcsItem);
 
-        HBox box = new HBox(6, newEventBtn, autoScheduleBtn, icsMenuBtn);
+        HBox box = new HBox(6, newEventBtn, icsMenuBtn);
         box.setAlignment(Pos.CENTER_RIGHT);
         return box;
     }
@@ -524,10 +535,7 @@ public class MainWindow extends BorderPane {
             setTop(null);
             setBottom(null);
             workspaceSplit.getItems().setAll(lectureRenderPane);
-            if (stage != null) {
-                stage.setFullScreenExitHint("");
-                stage.setFullScreen(true);
-            }
+            enterStageFullScreen(stage, true);
         } else {
             if (stage != null && stage.isFullScreen()) {
                 stage.setFullScreen(false);
@@ -546,11 +554,17 @@ public class MainWindow extends BorderPane {
         if (lectureRenderPane != null) {
             lectureRenderPane.setFullScreenState(false);
             workspaceSplit.getItems().setAll(mainContentHost, lectureRenderPane);
-            workspaceSplit.setDividerPositions(savedSplitDivider);
+            double restoreDivider = savedSplitDivider;
+            Platform.runLater(() -> {
+                if (!renderFullScreen && workspaceSplit.getItems().contains(lectureRenderPane)) {
+                    workspaceSplit.setDividerPositions(restoreDivider);
+                }
+            });
         } else {
             workspaceSplit.getItems().setAll(mainContentHost);
         }
-        Platform.runLater(this::applyNativeTitleBar);
+        restorePreFullScreenMaximized(resolveWindowStage());
+        titleBarAfterFullScreen.playFromStart();
     }
 
     private void setWorkspaceFullScreen(boolean enable) {
@@ -565,10 +579,7 @@ public class MainWindow extends BorderPane {
             studyWorkspaceView.setFullScreenState(true);
             setTop(null);
             setBottom(null);
-            if (stage != null) {
-                stage.setFullScreenExitHint("");
-                stage.setFullScreen(true);
-            }
+            enterStageFullScreen(stage, false);
         } else {
             if (stage != null && stage.isFullScreen()) {
                 stage.setFullScreen(false);
@@ -587,7 +598,42 @@ public class MainWindow extends BorderPane {
         if (studyWorkspaceView != null) {
             studyWorkspaceView.setFullScreenState(false);
         }
-        Platform.runLater(this::applyNativeTitleBar);
+        restorePreFullScreenMaximized(resolveWindowStage());
+        titleBarAfterFullScreen.playFromStart();
+    }
+
+    private void enterStageFullScreen(Stage stage, boolean renderMode) {
+        if (stage == null) {
+            return;
+        }
+        preFullScreenMaximized = stage.isMaximized();
+        if (preFullScreenMaximized) {
+            stage.setMaximized(false);
+            Platform.runLater(() -> {
+                boolean stillRequested;
+                if (renderMode) {
+                    stillRequested = renderFullScreen;
+                } else {
+                    stillRequested = workspaceFullScreen;
+                }
+                if (stillRequested) {
+                    stage.setFullScreenExitHint("");
+                    stage.setFullScreen(true);
+                }
+            });
+        } else {
+            stage.setFullScreenExitHint("");
+            stage.setFullScreen(true);
+        }
+    }
+
+    private void restorePreFullScreenMaximized(Stage stage) {
+        if (stage != null && preFullScreenMaximized) {
+            preFullScreenMaximized = false;
+            Platform.runLater(() -> stage.setMaximized(true));
+        } else {
+            preFullScreenMaximized = false;
+        }
     }
 
     private void updateModeVisibility() {

@@ -167,10 +167,6 @@ public class SettingsDialog extends Dialog<Void> {
         clearPastBtn.setMaxWidth(Double.MAX_VALUE);
         clearPastBtn.setOnAction(e -> handleClearPast());
 
-        Button clearScheduledBtn = new Button("Clear Scheduled Sessions");
-        clearScheduledBtn.setMaxWidth(Double.MAX_VALUE);
-        clearScheduledBtn.setOnAction(e -> handleClearScheduled());
-
         Button optimizeBtn = new Button("Optimize & Compact Database");
         optimizeBtn.setMaxWidth(Double.MAX_VALUE);
         optimizeBtn.setOnAction(e -> handleOptimize());
@@ -200,7 +196,6 @@ public class SettingsDialog extends Dialog<Void> {
                 dbStatsLabel,
                 memoryLabel,
                 clearPastBtn,
-                clearScheduledBtn,
                 optimizeBtn,
                 resetBtn,
                 noteLabel,
@@ -217,13 +212,6 @@ public class SettingsDialog extends Dialog<Void> {
         });
     }
 
-    private void handleClearScheduled() {
-        runBackground("Clearing scheduled sessions...", () -> {
-            service.clearScheduledEvents();
-            return "Cleared all auto-scheduled sessions.";
-        });
-    }
-
     private void handleOptimize() {
         runBackground("Compacting database...", () -> {
             StorageStats stats = service.optimizeAndCompact();
@@ -236,7 +224,7 @@ public class SettingsDialog extends Dialog<Void> {
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
         confirm.initOwner(getDialogPane().getScene().getWindow());
         confirm.setTitle("Reset Calendar History & Settings");
-        confirm.setHeaderText("Delete all calendar events, recurring rules, goals, and sleep settings?");
+        confirm.setHeaderText("Delete all calendar events and recurring events?");
         confirm.setContentText("Your markdown course folders will stay intact.");
         WindowsTitleBar.styleDialog(confirm, activeTheme.resolve(systemDarkSupplier.getAsBoolean()));
 

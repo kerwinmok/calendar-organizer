@@ -2,11 +2,10 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.llm.ParserMode;
 import com.calendarorganizer.model.CalendarEvent;
+import com.calendarorganizer.model.CalendarLayer;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.RecurringRule;
-import com.calendarorganizer.model.ScheduleGoal;
-import com.calendarorganizer.model.SchedulePreferences;
-import com.calendarorganizer.scheduler.ScheduleResult;
 import com.calendarorganizer.service.AppExecutors;
 import com.calendarorganizer.service.ApplySentenceResult;
 import com.calendarorganizer.service.CalendarService;
@@ -15,19 +14,22 @@ import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
@@ -38,7 +40,9 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -55,21 +59,31 @@ public class CalendarTabView extends BorderPane {
     private final ScrollPane inspectorScroll;
     private final AtomicLong refreshSeq = new AtomicLong(0L);
 
-    private final TextField sleepField = new TextField();
-    private final ListView<RecurringRule> rulesList = new ListView<>();
-    private final ListView<ScheduleGoal> goalsList = new ListView<>();
     private final Label clusterHeaderLabel = new Label("");
     private final ListView<CalendarEvent> clusterEventsList = new ListView<>();
     private final Label selectedTitleLabel = new Label("None selected");
     private final Label selectedTimeLabel = new Label("");
     private final Label selectedMetaLabel = new Label("");
-    private final Button editEventButton = new Button("Edit Event");
-    private final Button deleteEventButton = new Button("Delete Event");
+    private final TextArea selectedNotesArea = new TextArea();
+    private final Button editEventButton = new Button("Edit");
+    private final Button deleteEventButton = new Button("Delete");
+
+    private final ListView<CalendarLayer> calendarsList = new ListView<>();
+    private final Button addCalendarBtn = new Button("+ Calendar");
+    private final Button editCalendarBtn = new Button("Edit");
+    private final Button onlyCalendarBtn = new Button("Only");
+    private final Button allCalendarsBtn = new Button("All");
+    private final Button deleteCalendarBtn = new Button("Delete");
 
     private LocalDate currentWeekStart;
     private CalendarEvent selectedEvent;
     private List<CalendarEvent> selectedClusterEvents = List.of();
+    private List<CalendarLayer> currentCalendars = List.of();
+    private List<RecurringRule> cachedRules = List.of();
+    private Map<Long, EventColor> calendarColorMap = Map.of();
+    private Map<Long, String> calendarNameMap = Map.of();
     private boolean updatingClusterList;
+    private boolean updatingCalendarsList;
     private UiTheme activeTheme = UiTheme.CHARCOAL;
     private boolean inspectorVisible = true;
     private String lastStatus = "Ready.";
@@ -94,86 +108,6 @@ public class CalendarTabView extends BorderPane {
     }
 
     private ScrollPane buildInspector() {
-        sleepField.setPrefWidth(78);
-        Button setSleepBtn = new Button("Set");
-        setSleepBtn.setOnAction(e -> handleUpdateSleep());
-        HBox sleepRow = new HBox(8, sleepField, setSleepBtn);
-        sleepRow.setAlignment(Pos.CENTER_LEFT);
-        TitledPane sleepPane = new TitledPane("Sleep Window", sleepRow);
-        sleepPane.setExpanded(true);
-
-        rulesList.setPrefHeight(130);
-        rulesList.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(RecurringRule item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                } else {
-                    setText(item.getTitle() + " (" + formatDays(item) + " "
-                            + item.getStartTime().format(TIME_FMT) + "-" + item.getEndTime().format(TIME_FMT) + ")");
-                }
-            }
-        });
-        rulesList.setOnMouseClicked(ev -> {
-            if (ev.getClickCount() == 2) {
-                RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
-                if (rule != null) {
-                    openEditRuleDialog(rule);
-                }
-            }
-        });
-        Button editRuleBtn = new Button("Edit Rule");
-        editRuleBtn.setMaxWidth(Double.MAX_VALUE);
-        HBox.setHgrow(editRuleBtn, Priority.ALWAYS);
-        editRuleBtn.setOnAction(e -> {
-            RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
-            if (rule != null) {
-                openEditRuleDialog(rule);
-            }
-        });
-        Button deleteRuleBtn = new Button("Delete Rule");
-        deleteRuleBtn.setMaxWidth(Double.MAX_VALUE);
-        HBox.setHgrow(deleteRuleBtn, Priority.ALWAYS);
-        deleteRuleBtn.setOnAction(e -> {
-            RecurringRule rule = rulesList.getSelectionModel().getSelectedItem();
-            if (rule != null) {
-                service.deleteRecurringRule(rule.getId());
-                selectedEvent = null;
-                refreshView();
-                publishStatus("Deleted rule: " + rule.getTitle());
-            }
-        });
-        HBox ruleActions = new HBox(6, editRuleBtn, deleteRuleBtn);
-        VBox rulesBox = new VBox(6, rulesList, ruleActions);
-        TitledPane rulesPane = new TitledPane("Recurring Rules", rulesBox);
-        rulesPane.setExpanded(true);
-
-        goalsList.setPrefHeight(115);
-        goalsList.setCellFactory(list -> new ListCell<>() {
-            @Override
-            protected void updateItem(ScheduleGoal item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                } else {
-                    setText(item.getTitle() + " (" + item.getSessionsPerWeek() + "x "
-                            + item.getSessionMinutes() + "m, total " + item.totalTargetMinutes() + "m)");
-                }
-            }
-        });
-        Button deleteGoalBtn = new Button("Delete Goal");
-        deleteGoalBtn.setMaxWidth(Double.MAX_VALUE);
-        deleteGoalBtn.setOnAction(e -> {
-            ScheduleGoal goal = goalsList.getSelectionModel().getSelectedItem();
-            if (goal != null) {
-                handleDeleteGoal(goal);
-            }
-        });
-        VBox goalsBox = new VBox(6, goalsList, deleteGoalBtn);
-        TitledPane goalsPane = new TitledPane("Goals", goalsBox);
-        goalsPane.setExpanded(true);
-
         clusterHeaderLabel.getStyleClass().add("caution-label");
         clusterHeaderLabel.setVisible(false);
         clusterHeaderLabel.setManaged(false);
@@ -217,6 +151,14 @@ public class CalendarTabView extends BorderPane {
         selectedTimeLabel.setWrapText(true);
         selectedMetaLabel.getStyleClass().add("dim-label");
         selectedMetaLabel.setWrapText(true);
+
+        selectedNotesArea.getStyleClass().add("event-notes-viewer");
+        selectedNotesArea.setEditable(false);
+        selectedNotesArea.setWrapText(true);
+        selectedNotesArea.setPrefRowCount(5);
+        selectedNotesArea.setPromptText("No description");
+        selectedNotesArea.setDisable(true);
+
         editEventButton.setDisable(true);
         editEventButton.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(editEventButton, Priority.ALWAYS);
@@ -228,15 +170,9 @@ public class CalendarTabView extends BorderPane {
         deleteEventButton.setDisable(true);
         deleteEventButton.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(deleteEventButton, Priority.ALWAYS);
-        deleteEventButton.setOnAction(e -> {
-            if (selectedEvent != null && selectedEvent.getId() > 0) {
-                service.deleteEvent(selectedEvent.getId());
-                selectedEvent = null;
-                refreshView();
-                publishStatus("Deleted selected event.");
-            }
-        });
+        deleteEventButton.setOnAction(e -> handleDeleteSelectedEvent());
         HBox selectedActions = new HBox(6, editEventButton, deleteEventButton);
+
         VBox selectedBox = new VBox(
                 6,
                 clusterHeaderLabel,
@@ -244,21 +180,92 @@ public class CalendarTabView extends BorderPane {
                 selectedTitleLabel,
                 selectedTimeLabel,
                 selectedMetaLabel,
+                selectedNotesArea,
                 selectedActions
         );
         TitledPane selectedPane = new TitledPane("Selected Event", selectedBox);
         selectedPane.setExpanded(true);
 
-        VBox sections = new VBox(0, selectedPane, sleepPane, rulesPane, goalsPane);
+        calendarsList.setPrefHeight(140);
+        calendarsList.setCellFactory(list -> new ListCell<>() {
+            private final CheckBox visibleCheck = new CheckBox();
+            private final Region swatch = new Region();
+            private final Label nameLabel = new Label();
+            private final HBox row = new HBox(8, visibleCheck, swatch, nameLabel);
+            private CalendarLayer boundLayer;
+
+            {
+                swatch.getStyleClass().add("calendar-color-dot");
+                row.setAlignment(Pos.CENTER_LEFT);
+                visibleCheck.setOnAction(e -> {
+                    if (updatingCalendarsList || boundLayer == null) {
+                        return;
+                    }
+                    long layerId = boundLayer.getId();
+                    boolean nextVisible = visibleCheck.isSelected();
+                    runCalendarMutation(null, () -> service.setCalendarVisible(layerId, nextVisible));
+                });
+            }
+
+            @Override
+            protected void updateItem(CalendarLayer item, boolean empty) {
+                super.updateItem(item, empty);
+                boundLayer = item;
+                if (empty || item == null) {
+                    setGraphic(null);
+                    setText(null);
+                } else {
+                    boolean prevUpdating = updatingCalendarsList;
+                    updatingCalendarsList = true;
+                    try {
+                        visibleCheck.setSelected(item.isVisible());
+                    } finally {
+                        updatingCalendarsList = prevUpdating;
+                    }
+                    swatch.setStyle("-fx-background-color: " + item.getColor().getSwatchHex() + ";");
+                    nameLabel.setText(item.getName());
+                    setGraphic(row);
+                    setText(null);
+                }
+            }
+        });
+        calendarsList.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) ->
+                updateCalendarActionButtons());
+
+        addCalendarBtn.setOnAction(e -> handleCreateCalendarLayer());
+        editCalendarBtn.setOnAction(e -> handleEditCalendarLayer());
+        onlyCalendarBtn.setOnAction(e -> handleIsolateSelectedCalendar());
+        allCalendarsBtn.setOnAction(e -> runCalendarMutation("Showing all calendars.", () -> service.setAllCalendarsVisible(true)));
+        deleteCalendarBtn.setOnAction(e -> handleDeleteCalendarLayer());
+
+        addCalendarBtn.setMaxWidth(Double.MAX_VALUE);
+        editCalendarBtn.setMaxWidth(Double.MAX_VALUE);
+        onlyCalendarBtn.setMaxWidth(Double.MAX_VALUE);
+        allCalendarsBtn.setMaxWidth(Double.MAX_VALUE);
+        deleteCalendarBtn.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(addCalendarBtn, Priority.ALWAYS);
+        HBox.setHgrow(editCalendarBtn, Priority.ALWAYS);
+        HBox.setHgrow(onlyCalendarBtn, Priority.ALWAYS);
+        HBox.setHgrow(allCalendarsBtn, Priority.ALWAYS);
+        HBox.setHgrow(deleteCalendarBtn, Priority.ALWAYS);
+
+        HBox calRowTop = new HBox(6, addCalendarBtn, editCalendarBtn, deleteCalendarBtn);
+        HBox calRowBottom = new HBox(6, onlyCalendarBtn, allCalendarsBtn);
+        VBox calendarsBox = new VBox(6, calendarsList, calRowTop, calRowBottom);
+        TitledPane calendarsPane = new TitledPane("Calendars", calendarsBox);
+        calendarsPane.setExpanded(true);
+
+        VBox sections = new VBox(0, selectedPane, calendarsPane);
         sections.setFillWidth(true);
         VBox.setVgrow(sections, Priority.ALWAYS);
 
         ScrollPane scroll = new ScrollPane(sections);
         scroll.setFitToWidth(true);
         scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scroll.setPrefWidth(270);
+        scroll.setPrefWidth(275);
         scroll.setMinWidth(240);
         scroll.getStyleClass().add("lc-sidebar");
+        updateCalendarActionButtons();
         return scroll;
     }
 
@@ -283,15 +290,32 @@ public class CalendarTabView extends BorderPane {
     }
 
     public void openNewEventDialog(LocalDate date, LocalTime start, LocalTime end) {
-        Optional<CalendarEvent> created = EventDialog.showEventDialog(
-                getScene().getWindow(), activeTheme, null, date, start, end
+        long defaultCalId = resolvePreferredCalendarId();
+        Optional<EventDialog.EventDialogResult> created = EventDialog.showUnifiedEventDialog(
+                getScene().getWindow(),
+                activeTheme,
+                null,
+                date,
+                start,
+                end,
+                currentCalendars,
+                defaultCalId
         );
         if (created.isPresent()) {
-            CalendarEvent saved = service.saveManualEvent(created.get());
-            selectedEvent = saved;
-            refreshView();
-            publishStatus("Added event: " + saved.getTitle() + " (" + saved.getStartTime().format(TIME_FMT)
-                    + "-" + saved.getEndTime().format(TIME_FMT) + ")");
+            EventDialog.EventDialogResult result = created.get();
+            if (result.isRecurring()) {
+                RecurringRule savedRule = service.saveRecurringRule(result.getRecurringRule());
+                ensureCalendarVisibleIfHidden(savedRule.getCalendarId());
+                refreshView();
+                publishStatus("Added weekly event: " + savedRule.getTitle() + " (" + formatDays(savedRule) + ")");
+            } else {
+                CalendarEvent saved = service.saveManualEvent(result.getEvent());
+                ensureCalendarVisibleIfHidden(saved.getCalendarId());
+                selectedEvent = saved;
+                refreshView();
+                publishStatus("Added event: " + saved.getTitle() + " (" + saved.getStartTime().format(TIME_FMT)
+                        + "-" + saved.getEndTime().format(TIME_FMT) + ")");
+            }
         }
     }
 
@@ -306,33 +330,60 @@ public class CalendarTabView extends BorderPane {
         if (event.getId() <= 0) {
             return;
         }
-        Optional<CalendarEvent> updated = EventDialog.showEventDialog(
+        Optional<EventDialog.EventDialogResult> updated = EventDialog.showUnifiedEventDialog(
                 getScene().getWindow(),
                 activeTheme,
                 event,
                 event.getStartTime().toLocalDate(),
                 event.getStartTime().toLocalTime(),
-                event.getEndTime().toLocalTime()
+                event.getEndTime().toLocalTime(),
+                currentCalendars,
+                event.getCalendarId()
         );
-        if (updated.isPresent()) {
-            CalendarEvent saved = updated.get();
+        if (updated.isPresent() && !updated.get().isRecurring()) {
+            CalendarEvent saved = updated.get().getEvent();
             service.updateEvent(saved);
+            ensureCalendarVisibleIfHidden(saved.getCalendarId());
             selectedEvent = saved;
             refreshView();
             publishStatus("Updated event: " + saved.getTitle());
         }
     }
 
+    private void handleDeleteSelectedEvent() {
+        if (selectedEvent == null) {
+            return;
+        }
+        if (selectedEvent.getSource() == EventSource.RECURRING) {
+            RecurringRule matchingRule = findRuleForOccurrence(selectedEvent);
+            if (matchingRule != null) {
+                service.deleteRecurringRule(matchingRule.getId());
+                selectedEvent = null;
+                refreshView();
+                publishStatus("Deleted weekly event: " + matchingRule.getTitle());
+            }
+            return;
+        }
+        if (selectedEvent.getId() > 0) {
+            String title = selectedEvent.getTitle();
+            service.deleteEvent(selectedEvent.getId());
+            selectedEvent = null;
+            refreshView();
+            publishStatus("Deleted event: " + title);
+        }
+    }
+
     private void openEditRuleDialog(RecurringRule rule) {
         Optional<RecurringRule> updated = EventDialog.showRecurringRuleDialog(
-                getScene().getWindow(), activeTheme, rule
+                getScene().getWindow(), activeTheme, rule, currentCalendars
         );
         if (updated.isPresent()) {
             RecurringRule saved = updated.get();
             service.updateRecurringRule(saved);
+            ensureCalendarVisibleIfHidden(saved.getCalendarId());
             selectedEvent = null;
             refreshView();
-            publishStatus("Updated recurring rule: " + saved.getTitle());
+            publishStatus("Updated weekly event: " + saved.getTitle());
         }
     }
 
@@ -351,6 +402,11 @@ public class CalendarTabView extends BorderPane {
             if (secondDash > 5) {
                 try {
                     long ruleId = Long.parseLong(uid.substring(5, secondDash));
+                    for (RecurringRule rule : cachedRules) {
+                        if (rule.getId() == ruleId) {
+                            return rule;
+                        }
+                    }
                     for (RecurringRule rule : service.findAllRecurringRules()) {
                         if (rule.getId() == ruleId) {
                             return rule;
@@ -387,20 +443,19 @@ public class CalendarTabView extends BorderPane {
             refDate = currentWeekStart;
         }
         LocalDate effectiveRef = refDate;
-        publishStatus("Parsing sentence...");
+        long targetCalendarId = resolvePreferredCalendarId();
+        publishStatus("Parsing schedule request...");
 
         Task<ApplySentenceResult> task = new Task<>() {
             @Override
             protected ApplySentenceResult call() {
-                return service.applySentence(text, effectiveRef, mode);
+                return service.applySentence(text, effectiveRef, mode, targetCalendarId);
             }
         };
 
         task.setOnSucceeded(ev -> {
             ApplySentenceResult res = task.getValue();
-            if (selectedEvent != null && selectedEvent.getSource() == EventSource.SCHEDULED) {
-                selectedEvent = null;
-            }
+            ensureCalendarVisibleIfHidden(targetCalendarId);
             refreshView();
             publishStatus(formatApplySummary(res));
             if (onFinished != null) {
@@ -423,31 +478,6 @@ public class CalendarTabView extends BorderPane {
         CalendarService.backgroundExecutor().execute(task);
     }
 
-    public void rescheduleCurrentWeek() {
-        LocalDate targetWeek = currentWeekStart;
-        publishStatus("Scheduling week...");
-        Task<ScheduleResult> task = new Task<>() {
-            @Override
-            protected ScheduleResult call() {
-                return service.rescheduleWeek(targetWeek);
-            }
-        };
-        task.setOnSucceeded(ev -> {
-            ScheduleResult result = task.getValue();
-            if (selectedEvent != null && selectedEvent.getSource() == EventSource.SCHEDULED) {
-                selectedEvent = null;
-            }
-            refreshView();
-            String msg = "Scheduled " + result.getScheduledEvents().size() + " goal sessions.";
-            if (!result.getUnscheduledNotes().isEmpty()) {
-                msg = msg + " " + String.join(" ", result.getUnscheduledNotes());
-            }
-            publishStatus(msg);
-        });
-        task.setOnFailed(ev -> publishStatus("Scheduling failed."));
-        CalendarService.backgroundExecutor().execute(task);
-    }
-
     public void importIcsFile() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Import .ics Calendar");
@@ -456,16 +486,23 @@ public class CalendarTabView extends BorderPane {
         if (file == null) {
             return;
         }
-        publishStatus("Importing " + file.getName() + "...");
+        Optional<CalendarLayer> target = chooseTargetCalendarForImport("Import .ics into Calendar");
+        if (target.isEmpty()) {
+            return;
+        }
+        long targetId = target.get().getId();
+        String targetName = target.get().getName();
+        publishStatus("Importing " + file.getName() + " into " + targetName + "...");
         Task<IcsImportSummary> task = new Task<>() {
             @Override
             protected IcsImportSummary call() throws Exception {
-                return service.importIcsFile(file.toPath());
+                return service.importIcsFile(file.toPath(), targetId);
             }
         };
         task.setOnSucceeded(ev -> {
+            ensureCalendarVisibleIfHidden(targetId);
             refreshView();
-            publishStatus(formatImportSummary(task.getValue()));
+            publishStatus(formatImportSummary(task.getValue(), targetName));
         });
         task.setOnFailed(ev -> {
             Throwable err = task.getException();
@@ -499,17 +536,24 @@ public class CalendarTabView extends BorderPane {
 
         Optional<String> pasted = dialog.showAndWait();
         if (pasted.isPresent()) {
+            Optional<CalendarLayer> target = chooseTargetCalendarForImport("Import .ics into Calendar");
+            if (target.isEmpty()) {
+                return;
+            }
+            long targetId = target.get().getId();
+            String targetName = target.get().getName();
             String rawText = pasted.get();
-            publishStatus("Importing pasted .ics...");
+            publishStatus("Importing pasted .ics into " + targetName + "...");
             Task<IcsImportSummary> task = new Task<>() {
                 @Override
                 protected IcsImportSummary call() {
-                    return service.importIcsText(rawText);
+                    return service.importIcsText(rawText, targetId);
                 }
             };
             task.setOnSucceeded(ev -> {
+                ensureCalendarVisibleIfHidden(targetId);
                 refreshView();
-                publishStatus(formatImportSummary(task.getValue()));
+                publishStatus(formatImportSummary(task.getValue(), targetName));
             });
             task.setOnFailed(ev -> publishStatus("Import failed."));
             CalendarService.backgroundExecutor().execute(task);
@@ -572,19 +616,27 @@ public class CalendarTabView extends BorderPane {
         LocalDate targetWeek = currentWeekStart;
         long seq = refreshSeq.incrementAndGet();
         AppExecutors.ioExecutor().execute(() -> {
+            List<CalendarLayer> calendars = service.findAllCalendars();
             List<RecurringRule> rules = service.findAllRecurringRules();
-            List<CalendarEvent> events = service.getEventsForWeek(targetWeek, rules);
-            List<ScheduleGoal> goals = service.findAllGoals();
-            SchedulePreferences prefs = service.loadPreferences();
+            List<CalendarEvent> events = service.getVisibleEventsForWeek(targetWeek, calendars, rules);
+            Map<Long, EventColor> colorMap = new HashMap<>();
+            Map<Long, String> nameMap = new HashMap<>();
+            for (CalendarLayer layer : calendars) {
+                colorMap.put(layer.getId(), layer.getColor());
+                nameMap.put(layer.getId(), layer.getName());
+            }
             Platform.runLater(() -> {
                 if (refreshSeq.get() != seq) {
                     return;
                 }
+                this.currentCalendars = calendars;
+                this.cachedRules = rules;
+                this.calendarColorMap = colorMap;
+                this.calendarNameMap = nameMap;
+                syncCalendarsList(calendars);
+
                 reconcileSelectedCluster(events);
-                weekGridView.setWeekData(targetWeek, events, selectedEvent);
-                rulesList.getItems().setAll(rules);
-                goalsList.getItems().setAll(goals);
-                sleepField.setText(prefs.getSleepTime().format(TIME_FMT));
+                weekGridView.setWeekData(targetWeek, events, selectedEvent, colorMap);
 
                 updateSelectedPanel();
                 if (onDataChanged != null) {
@@ -594,59 +646,180 @@ public class CalendarTabView extends BorderPane {
         });
     }
 
-    private void handleDeleteGoal(ScheduleGoal goal) {
-        LocalDate targetWeek = currentWeekStart;
-        publishStatus("Updating goals and rescheduling...");
-        Task<Void> task = new Task<>() {
-            @Override
-            protected Void call() {
-                service.deleteGoal(goal.getId());
-                service.rescheduleWeek(targetWeek);
-                return null;
+    private void syncCalendarsList(List<CalendarLayer> calendars) {
+        CalendarLayer previouslySelected = calendarsList.getSelectionModel().getSelectedItem();
+        long prevId = -1L;
+        if (previouslySelected != null) {
+            prevId = previouslySelected.getId();
+        }
+        updatingCalendarsList = true;
+        try {
+            calendarsList.getItems().setAll(calendars);
+            CalendarLayer match = null;
+            for (CalendarLayer layer : calendars) {
+                if (layer.getId() == prevId) {
+                    match = layer;
+                    break;
+                }
             }
-        };
-        task.setOnSucceeded(ev -> {
-            selectedEvent = null;
-            refreshView();
-            publishStatus("Deleted goal: " + goal.getTitle());
-        });
-        task.setOnFailed(ev -> publishStatus("Failed to delete goal."));
-        CalendarService.backgroundExecutor().execute(task);
+            if (match != null) {
+                calendarsList.getSelectionModel().select(match);
+            } else if (!calendars.isEmpty()) {
+                calendarsList.getSelectionModel().selectFirst();
+            }
+        } finally {
+            updatingCalendarsList = false;
+        }
+        updateCalendarActionButtons();
     }
 
-    private void handleUpdateSleep() {
-        String raw = sleepField.getText();
-        if (raw == null || raw.isBlank()) {
+    private void updateCalendarActionButtons() {
+        CalendarLayer sel = calendarsList.getSelectionModel().getSelectedItem();
+        boolean hasSel = sel != null;
+        boolean multiple = currentCalendars.size() > 1;
+        editCalendarBtn.setDisable(!hasSel);
+        onlyCalendarBtn.setDisable(!hasSel || !multiple);
+        allCalendarsBtn.setDisable(!multiple);
+        deleteCalendarBtn.setDisable(!hasSel || !multiple);
+    }
+
+    private long resolvePreferredCalendarId() {
+        CalendarLayer selected = calendarsList.getSelectionModel().getSelectedItem();
+        if (selected != null && selected.isVisible()) {
+            return selected.getId();
+        }
+        for (CalendarLayer layer : currentCalendars) {
+            if (layer.isVisible()) {
+                return layer.getId();
+            }
+        }
+        if (selected != null) {
+            return selected.getId();
+        }
+        if (!currentCalendars.isEmpty()) {
+            return currentCalendars.get(0).getId();
+        }
+        return 1L;
+    }
+
+    private void ensureCalendarVisibleIfHidden(long calendarId) {
+        for (CalendarLayer layer : currentCalendars) {
+            if (layer.getId() == calendarId && !layer.isVisible()) {
+                AppExecutors.ioExecutor().execute(() -> {
+                    service.setCalendarVisible(calendarId, true);
+                    Platform.runLater(this::refreshView);
+                });
+                return;
+            }
+        }
+    }
+
+    private Optional<CalendarLayer> chooseTargetCalendarForImport(String headerTitle) {
+        if (currentCalendars.isEmpty()) {
+            return Optional.of(new CalendarLayer(1L, "General", EventColor.BLUE, true));
+        }
+        if (currentCalendars.size() == 1) {
+            return Optional.of(currentCalendars.get(0));
+        }
+        long preferredId = resolvePreferredCalendarId();
+        CalendarLayer defaultChoice = currentCalendars.get(0);
+        for (CalendarLayer layer : currentCalendars) {
+            if (layer.getId() == preferredId) {
+                defaultChoice = layer;
+                break;
+            }
+        }
+        ChoiceDialog<CalendarLayer> dialog = new ChoiceDialog<>(defaultChoice, currentCalendars);
+        dialog.initOwner(getScene().getWindow());
+        dialog.setTitle(headerTitle);
+        dialog.setHeaderText("Select the target calendar layer");
+        dialog.setContentText("Calendar:");
+        WindowsTitleBar.styleDialog(dialog, activeTheme);
+        return dialog.showAndWait();
+    }
+
+    private void handleCreateCalendarLayer() {
+        Optional<CalendarLayer> created = EventDialog.showCalendarLayerDialog(
+                getScene().getWindow(), activeTheme, null
+        );
+        if (created.isEmpty()) {
             return;
         }
-        LocalTime parsed;
-        try {
-            parsed = EventFormValidator.parseTime(raw);
-        } catch (IllegalArgumentException ex) {
-            publishStatus("Invalid sleep time. Use HH:mm (for example 00:00 or 23:00).");
+        CalendarLayer draft = created.get();
+        runCalendarMutation("Created calendar: " + draft.getName(), () ->
+                service.createCalendar(draft.getName(), draft.getColor()));
+    }
+
+    private void handleEditCalendarLayer() {
+        CalendarLayer selected = calendarsList.getSelectionModel().getSelectedItem();
+        if (selected == null) {
             return;
         }
-        LocalDate targetWeek = currentWeekStart;
-        publishStatus("Updating sleep window...");
-        Task<Void> task = new Task<>() {
-            @Override
-            protected Void call() {
-                service.updateSleepTime(parsed);
-                if (!service.findAllGoals().isEmpty()) {
-                    service.rescheduleWeek(targetWeek);
-                }
-                return null;
+        Optional<CalendarLayer> updated = EventDialog.showCalendarLayerDialog(
+                getScene().getWindow(), activeTheme, selected
+        );
+        if (updated.isEmpty()) {
+            return;
+        }
+        CalendarLayer modified = updated.get();
+        runCalendarMutation("Updated calendar: " + modified.getName(), () ->
+                service.updateCalendar(modified));
+    }
+
+    private void handleIsolateSelectedCalendar() {
+        CalendarLayer selected = calendarsList.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            return;
+        }
+        runCalendarMutation("Viewing only: " + selected.getName(), () ->
+                service.setOnlyCalendarVisible(selected.getId()));
+    }
+
+    private void handleDeleteCalendarLayer() {
+        CalendarLayer selected = calendarsList.getSelectionModel().getSelectedItem();
+        if (selected == null || currentCalendars.size() <= 1) {
+            return;
+        }
+        CalendarLayer fallback = null;
+        for (CalendarLayer candidate : currentCalendars) {
+            if (candidate.getId() != selected.getId()) {
+                fallback = candidate;
+                break;
             }
-        };
-        task.setOnSucceeded(ev -> {
-            if (selectedEvent != null && selectedEvent.getSource() == EventSource.SCHEDULED) {
-                selectedEvent = null;
+        }
+        if (fallback == null) {
+            return;
+        }
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.initOwner(getScene().getWindow());
+        confirm.setTitle("Delete Calendar");
+        confirm.setHeaderText("Delete calendar \"" + selected.getName() + "\"?");
+        confirm.setContentText("Existing events in this calendar will move to \"" + fallback.getName() + "\".");
+        WindowsTitleBar.styleDialog(confirm, activeTheme);
+        Optional<ButtonType> choice = confirm.showAndWait();
+        if (choice.isEmpty() || choice.get() != ButtonType.OK) {
+            return;
+        }
+        long deleteId = selected.getId();
+        long fallbackId = fallback.getId();
+        String msg = "Deleted calendar \"" + selected.getName() + "\" (events moved to " + fallback.getName() + ").";
+        runCalendarMutation(msg, () -> service.deleteCalendar(deleteId, fallbackId));
+    }
+
+    private void runCalendarMutation(String successStatus, Runnable action) {
+        AppExecutors.ioExecutor().execute(() -> {
+            try {
+                action.run();
+                Platform.runLater(() -> {
+                    refreshView();
+                    if (successStatus != null && !successStatus.isBlank()) {
+                        publishStatus(successStatus);
+                    }
+                });
+            } catch (Exception ex) {
+                Platform.runLater(() -> publishStatus(ex.getMessage()));
             }
-            refreshView();
-            publishStatus("Sleep time updated to " + parsed.format(TIME_FMT));
         });
-        task.setOnFailed(ev -> publishStatus("Failed to update sleep time."));
-        CalendarService.backgroundExecutor().execute(task);
     }
 
     private void onEventClicked(CalendarEvent event) {
@@ -778,6 +951,8 @@ public class CalendarTabView extends BorderPane {
             selectedTitleLabel.setText("None selected");
             selectedTimeLabel.setText("");
             selectedMetaLabel.setText("");
+            selectedNotesArea.clear();
+            selectedNotesArea.setDisable(true);
             editEventButton.setDisable(true);
             deleteEventButton.setDisable(true);
             return;
@@ -786,12 +961,29 @@ public class CalendarTabView extends BorderPane {
         selectedTimeLabel.setText(selectedEvent.getStartTime().toLocalDate() + " "
                 + selectedEvent.getStartTime().format(TIME_FMT) + " -> "
                 + selectedEvent.getEndTime().format(TIME_FMT));
-        if (selectedEvent.getSource() == EventSource.RECURRING) {
-            selectedMetaLabel.setText("Recurring occurrence (Edit Rule or delete via Recurring Rules)");
-            editEventButton.setDisable(false);
-            deleteEventButton.setDisable(true);
+
+        String calName = calendarNameMap.getOrDefault(selectedEvent.getCalendarId(), "General");
+        selectedNotesArea.setDisable(false);
+        String notes = selectedEvent.getNotes();
+        if (notes != null && !notes.isBlank()) {
+            selectedNotesArea.setText(notes);
         } else {
-            selectedMetaLabel.setText(selectedEvent.getCategory().name() + " / " + selectedEvent.getSource().name());
+            selectedNotesArea.clear();
+        }
+
+        if (selectedEvent.getSource() == EventSource.RECURRING) {
+            RecurringRule matchingRule = findRuleForOccurrence(selectedEvent);
+            if (matchingRule != null) {
+                selectedMetaLabel.setText(calName + " · Weekly (" + formatDays(matchingRule) + ")");
+                editEventButton.setDisable(false);
+                deleteEventButton.setDisable(false);
+            } else {
+                selectedMetaLabel.setText(calName + " · Weekly");
+                editEventButton.setDisable(true);
+                deleteEventButton.setDisable(true);
+            }
+        } else {
+            selectedMetaLabel.setText(calName + " · " + selectedEvent.getSource().name());
             boolean hasId = selectedEvent.getId() > 0;
             editEventButton.setDisable(!hasId);
             deleteEventButton.setDisable(!hasId);
@@ -817,27 +1009,18 @@ public class CalendarTabView extends BorderPane {
 
     private String formatApplySummary(ApplySentenceResult res) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Parsed via ").append(res.getParseResult().getParserUsed()).append(": ");
-        sb.append(res.getAddedEvents()).append(" events, ");
-        sb.append(res.getAddedRules()).append(" rules, ");
-        sb.append(res.getUpdatedGoals()).append(" goals");
-        if (res.isUpdatedSleep()) {
-            sb.append(", sleep updated");
-        }
-        if (res.getScheduleResult() != null) {
-            sb.append(" · Scheduled ").append(res.getScheduleResult().getScheduledEvents().size()).append(" blocks");
-            if (!res.getScheduleResult().getUnscheduledNotes().isEmpty()) {
-                sb.append(" (").append(String.join(" ", res.getScheduleResult().getUnscheduledNotes())).append(")");
-            }
-        }
+        sb.append("Added via ").append(res.getParseResult().getParserUsed()).append(": ");
+        sb.append(res.getAddedEvents()).append(" event(s), ");
+        sb.append(res.getAddedRules()).append(" weekly event(s)");
         if (!res.getParseResult().getWarnings().isEmpty()) {
             sb.append(" · ").append(String.join("; ", res.getParseResult().getWarnings()));
         }
         return sb.toString();
     }
 
-    private String formatImportSummary(IcsImportSummary summary) {
-        String text = "Imported " + summary.getImportedEvents() + " events and " + summary.getImportedRules() + " rules.";
+    private String formatImportSummary(IcsImportSummary summary, String calendarName) {
+        String text = "Imported " + summary.getImportedEvents() + " events and "
+                + summary.getImportedRules() + " weekly events into " + calendarName + ".";
         if (!summary.getWarnings().isEmpty()) {
             text = text + " Warnings: " + String.join("; ", summary.getWarnings());
         }

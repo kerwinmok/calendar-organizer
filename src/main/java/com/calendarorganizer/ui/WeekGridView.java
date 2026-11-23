@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 public class WeekGridView extends VBox {
@@ -61,6 +63,7 @@ public class WeekGridView extends VBox {
     private double lastRelayoutWidth = -1.0;
     private LocalDate weekStart;
     private List<CalendarEvent> currentEvents = List.of();
+    private Map<Long, EventColor> calendarColors = Map.of();
     private CalendarEvent selectedEvent;
     private Consumer<CalendarEvent> onEventSelected;
     private Consumer<List<CalendarEvent>> onEventGroupSelected;
@@ -327,11 +330,23 @@ public class WeekGridView extends VBox {
     }
 
     public void setWeekData(LocalDate weekStart, List<CalendarEvent> events, CalendarEvent selectedEvent) {
+        setWeekData(weekStart, events, selectedEvent, Map.of());
+    }
+
+    public void setWeekData(LocalDate weekStart,
+                            List<CalendarEvent> events,
+                            CalendarEvent selectedEvent,
+                            Map<Long, EventColor> calendarColors) {
         this.weekStart = weekStart;
         if (events == null) {
             this.currentEvents = List.of();
         } else {
             this.currentEvents = events;
+        }
+        if (calendarColors == null) {
+            this.calendarColors = Map.of();
+        } else {
+            this.calendarColors = Map.copyOf(calendarColors);
         }
         this.selectedEvent = selectedEvent;
         updateHeaders();
@@ -629,7 +644,7 @@ public class WeekGridView extends VBox {
         VBox box = new VBox(1);
         box.setUserData(event);
         box.getStyleClass().add("event-block");
-        box.getStyleClass().add(categoryStyleClass(event.getCategory()));
+        box.getStyleClass().add(resolveEventColorClass(event));
         if (isSameOccurrence(selectedEvent, event)) {
             box.getStyleClass().add("event-selected");
         }
@@ -744,7 +759,9 @@ public class WeekGridView extends VBox {
                         day.atTime(CalendarGridMath.minutesToTime(newEndMin[0])),
                         event.getCategory(),
                         event.getSource(),
-                        event.getNotes()
+                        event.getNotes(),
+                        event.getCalendarId(),
+                        event.getColor()
                 );
                 if (onEventTimesChanged != null) {
                     onEventTimesChanged.accept(updated);
@@ -769,21 +786,15 @@ public class WeekGridView extends VBox {
         return Math.max(0.0, Math.min(dayGridHeight() - 1.0, y));
     }
 
-    private String categoryStyleClass(EventCategory category) {
-        switch (category) {
-            case WORK:
-                return "event-work";
-            case BUSY:
-                return "event-busy";
-            case WORKOUT:
-                return "event-workout";
-            case STUDY:
-                return "event-study";
-            case IMPORTED:
-                return "event-imported";
-            default:
-                return "event-general";
+    private String resolveEventColorClass(CalendarEvent event) {
+        if (event.getColor() != null && event.getColor() != EventColor.DEFAULT) {
+            return event.getColor().getStyleClass();
         }
+        EventColor layerColor = calendarColors.get(event.getCalendarId());
+        if (layerColor != null && layerColor != EventColor.DEFAULT) {
+            return layerColor.getStyleClass();
+        }
+        return EventColor.fallbackForCategory(event.getCategory()).getStyleClass();
     }
 
     private static class DaySlice {

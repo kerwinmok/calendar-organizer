@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.RecurringRule;
 
@@ -39,6 +40,18 @@ public final class EventFormValidator {
                                            String rawEnd,
                                            EventCategory category,
                                            String notes) {
+        return buildEvent(existing, rawTitle, date, rawStart, rawEnd, category, 1L, EventColor.DEFAULT, notes);
+    }
+
+    public static CalendarEvent buildEvent(CalendarEvent existing,
+                                           String rawTitle,
+                                           LocalDate date,
+                                           String rawStart,
+                                           String rawEnd,
+                                           EventCategory category,
+                                           long calendarId,
+                                           EventColor color,
+                                           String notes) {
         if (rawTitle == null || rawTitle.isBlank()) {
             throw new IllegalArgumentException("Title is required.");
         }
@@ -62,13 +75,23 @@ public final class EventFormValidator {
         if (safeCategory == null) {
             safeCategory = EventCategory.GENERAL;
         }
+        long safeCalendarId = calendarId;
+        if (safeCalendarId <= 0L) {
+            safeCalendarId = 1L;
+        }
+        EventColor safeColor = color;
+        if (safeColor == null) {
+            safeColor = EventColor.DEFAULT;
+        }
         String safeNotes = notes;
         if (safeNotes == null) {
             safeNotes = "";
         }
 
         if (existing == null) {
-            return new CalendarEvent(0L, null, rawTitle.trim(), startDt, endDt, safeCategory, EventSource.MANUAL, safeNotes);
+            return new CalendarEvent(
+                    0L, null, rawTitle.trim(), startDt, endDt, safeCategory, EventSource.MANUAL, safeNotes, safeCalendarId, safeColor
+            );
         }
         return new CalendarEvent(
                 existing.getId(),
@@ -78,7 +101,9 @@ public final class EventFormValidator {
                 endDt,
                 safeCategory,
                 existing.getSource(),
-                safeNotes
+                safeNotes,
+                safeCalendarId,
+                safeColor
         );
     }
 
@@ -88,6 +113,26 @@ public final class EventFormValidator {
                                                      String rawStart,
                                                      String rawEnd,
                                                      EventCategory category) {
+        long ruleCalId = 1L;
+        EventColor ruleColor = EventColor.DEFAULT;
+        String ruleNotes = "";
+        if (existing != null) {
+            ruleCalId = existing.getCalendarId();
+            ruleColor = existing.getColor();
+            ruleNotes = existing.getNotes();
+        }
+        return buildRecurringRule(existing, rawTitle, days, rawStart, rawEnd, category, ruleCalId, ruleColor, ruleNotes);
+    }
+
+    public static RecurringRule buildRecurringRule(RecurringRule existing,
+                                                     String rawTitle,
+                                                     Set<DayOfWeek> days,
+                                                     String rawStart,
+                                                     String rawEnd,
+                                                     EventCategory category,
+                                                     long calendarId,
+                                                     EventColor color,
+                                                     String notes) {
         if (rawTitle == null || rawTitle.isBlank()) {
             throw new IllegalArgumentException("Title is required.");
         }
@@ -104,6 +149,18 @@ public final class EventFormValidator {
         if (safeCategory == null) {
             safeCategory = EventCategory.GENERAL;
         }
+        long safeCalendarId = calendarId;
+        if (safeCalendarId <= 0L) {
+            safeCalendarId = 1L;
+        }
+        EventColor safeColor = color;
+        if (safeColor == null) {
+            safeColor = EventColor.DEFAULT;
+        }
+        String safeNotes = notes;
+        if (safeNotes == null) {
+            safeNotes = "";
+        }
         long ruleId = 0L;
         LocalDate startDate = null;
         LocalDate endDate = null;
@@ -112,6 +169,8 @@ public final class EventFormValidator {
             startDate = existing.getStartDate();
             endDate = existing.getEndDate();
         }
-        return new RecurringRule(ruleId, rawTitle.trim(), days, start, end, safeCategory, startDate, endDate);
+        return new RecurringRule(
+                ruleId, rawTitle.trim(), days, start, end, safeCategory, startDate, endDate, safeCalendarId, safeColor, safeNotes
+        );
     }
 }

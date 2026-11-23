@@ -2,6 +2,7 @@ package com.calendarorganizer.ui;
 
 import com.calendarorganizer.model.CalendarEvent;
 import com.calendarorganizer.model.EventCategory;
+import com.calendarorganizer.model.EventColor;
 import com.calendarorganizer.model.EventSource;
 import com.calendarorganizer.model.RecurringRule;
 import org.junit.jupiter.api.Test;
@@ -123,5 +124,35 @@ class EventFormValidatorTest {
                 EventFormValidator.buildRecurringRule(existing, "Lab", EnumSet.of(DayOfWeek.MONDAY), "10:00", "10:00", EventCategory.WORK));
         assertThrows(IllegalArgumentException.class, () ->
                 EventFormValidator.buildRecurringRule(existing, "", EnumSet.of(DayOfWeek.MONDAY), "8:30", "10:00", EventCategory.WORK));
+
+        CalendarEvent layeredEvent = EventFormValidator.buildEvent(
+                null,
+                "Shift",
+                LocalDate.of(2026, 11, 18),
+                "07:00",
+                "12:00",
+                EventCategory.GENERAL,
+                2L,
+                EventColor.TEAL,
+                "Front desk"
+        );
+        assertEquals(2L, layeredEvent.getCalendarId());
+        assertEquals(EventColor.TEAL, layeredEvent.getColor());
+        assertEquals("Front desk", layeredEvent.getNotes());
+
+        RecurringRule layeredRule = EventFormValidator.buildRecurringRule(
+                null,
+                "CS Lecture",
+                EnumSet.of(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY),
+                "13:30",
+                "14:20",
+                EventCategory.GENERAL,
+                3L,
+                EventColor.PURPLE,
+                "Building AQ 3150"
+        );
+        assertEquals(3L, layeredRule.getCalendarId());
+        assertEquals(EventColor.PURPLE, layeredRule.getColor());
+        assertEquals("Building AQ 3150", layeredRule.getNotes());
     }
 }
