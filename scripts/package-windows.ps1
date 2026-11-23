@@ -60,16 +60,15 @@ try {
         --java-options "-Xms16m" `
         --java-options "-Xmx192m" `
         --java-options "-XX:+UseSerialGC" `
-        --java-options "-XX:TieredStopAtLevel=1" `
-        --java-options "-XX:ReservedCodeCacheSize=20m" `
+        --java-options "-XX:ReservedCodeCacheSize=32m" `
         --java-options "-Xss384k" `
         --java-options "-XX:MinHeapFreeRatio=10" `
         --java-options "-XX:MaxHeapFreeRatio=20" `
         --java-options "-XX:SoftRefLRUPolicyMSPerMB=50" `
         --java-options "-Djava.awt.headless=true" `
-        --java-options "-Dprism.order=sw" `
-        --java-options "-Dprism.maxvram=32m" `
-        --java-options "-Dprism.targetvram=16m" `
+        --java-options "-Dprism.order=d3d,sw" `
+        --java-options "-Dprism.maxvram=64m" `
+        --java-options "-Dprism.targetvram=32m" `
         --java-options "--enable-native-access=ALL-UNNAMED" `
         --dest $distDir
 

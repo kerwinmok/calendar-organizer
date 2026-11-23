@@ -230,14 +230,20 @@ public class LectureRenderPane extends BorderPane {
         entriesListView.setOnKeyReleased(ev -> scheduleVisiblePickerSync());
         entriesListView.setOnMouseReleased(ev -> scheduleVisiblePickerSync());
 
-        PauseTransition resizeDebounce = new PauseTransition(Duration.millis(120));
+        final double[] lastMeasuredWidth = new double[]{-1.0};
+        PauseTransition resizeDebounce = new PauseTransition(Duration.millis(180));
         resizeDebounce.setOnFinished(e -> {
-            if (zoomFit && !entriesListView.getItems().isEmpty()) {
+            double currentW = entriesListView.getWidth();
+            if (zoomFit && !entriesListView.getItems().isEmpty()
+                    && (lastMeasuredWidth[0] < 0.0 || Math.abs(currentW - lastMeasuredWidth[0]) >= 8.0)) {
+                lastMeasuredWidth[0] = currentW;
                 entriesListView.refresh();
             }
         });
         entriesListView.widthProperty().addListener((obs, oldW, newW) -> {
-            if (zoomFit && !entriesListView.getItems().isEmpty()) {
+            double next = newW.doubleValue();
+            if (zoomFit && !entriesListView.getItems().isEmpty()
+                    && (lastMeasuredWidth[0] < 0.0 || Math.abs(next - lastMeasuredWidth[0]) >= 8.0)) {
                 resizeDebounce.playFromStart();
             }
         });
