@@ -40,6 +40,7 @@ public class WeekGridView extends VBox {
 
     private static final double GUTTER_WIDTH = 56.0;
     private static final double RESIZE_HANDLE_PX = 7.0;
+    private static final double BOTTOM_PADDING_PX = 40.0;
     private static final DateTimeFormatter HEADER_DAY_FORMAT = DateTimeFormatter.ofPattern("EEE MM/dd");
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -158,8 +159,12 @@ public class WeekGridView extends VBox {
         Platform.runLater(() -> scrollPane.setVvalue(6.0 / 24.0));
     }
 
-    private double totalGridHeight() {
+    private double dayGridHeight() {
         return 24.0 * hourHeight;
+    }
+
+    private double totalGridHeight() {
+        return dayGridHeight() + BOTTOM_PADDING_PX;
     }
 
     private void setFixedPaneHeight(Region region, double height) {
@@ -761,7 +766,7 @@ public class WeekGridView extends VBox {
     }
 
     private double clampY(double y) {
-        return Math.max(0.0, Math.min(totalGridHeight() - 1.0, y));
+        return Math.max(0.0, Math.min(dayGridHeight() - 1.0, y));
     }
 
     private String categoryStyleClass(EventCategory category) {
