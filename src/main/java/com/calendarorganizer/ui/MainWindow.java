@@ -157,6 +157,10 @@ public class MainWindow extends BorderPane {
             view.setActiveTheme(getResolvedTheme());
             view.setOnFullScreenToggle(this::setWorkspaceFullScreen);
             view.setOnStatusChanged(this::updateStatus);
+            view.setOnCalendarDataChanged(() -> {
+                calendarTabView.refreshView();
+                refreshFooter();
+            });
             this.studyWorkspaceView = view;
         }
         return studyWorkspaceView;
@@ -354,7 +358,7 @@ public class MainWindow extends BorderPane {
     private void switchToCalendar() {
         exitAnyFullScreen();
         if (activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
-            studyWorkspaceView.releaseTransientCaches();
+            studyWorkspaceView.onTabDeactivated();
         }
         activeMode = ViewMode.CALENDAR;
         if (courseTabView != null) {
@@ -370,7 +374,7 @@ public class MainWindow extends BorderPane {
     private void switchToCourses() {
         exitAnyFullScreen();
         if (activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
-            studyWorkspaceView.releaseTransientCaches();
+            studyWorkspaceView.onTabDeactivated();
         }
         activeMode = ViewMode.COURSES;
         CourseTabView view = ensureCourseTabView();
@@ -611,6 +615,10 @@ public class MainWindow extends BorderPane {
     }
 
     private void openSettingsDialog() {
+        boolean temporarilyDetached = activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null;
+        if (temporarilyDetached) {
+            studyWorkspaceView.setDockTemporarilyDetached(true);
+        }
         SettingsDialog dialog = new SettingsDialog(
                 getScene().getWindow(),
                 calendarService,
@@ -629,6 +637,9 @@ public class MainWindow extends BorderPane {
             dialog.showAndWait();
         } finally {
             this.openSettingsDialog = null;
+            if (temporarilyDetached && activeMode == ViewMode.WORKSPACE && studyWorkspaceView != null) {
+                studyWorkspaceView.setDockTemporarilyDetached(false);
+            }
         }
     }
 

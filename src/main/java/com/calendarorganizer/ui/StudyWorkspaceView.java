@@ -20,6 +20,10 @@ import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SplitPane;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.DataFormat;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -28,12 +32,15 @@ import javafx.scene.layout.StackPane;
 import javafx.util.Duration;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public class StudyWorkspaceView extends BorderPane {
+
+    private static final DataFormat PANE_DRAG_FORMAT = resolvePaneDragFormat();
 
     private final CourseManager courseManager;
     private final CourseFilePreviewer previewer;
@@ -43,6 +50,7 @@ public class StudyWorkspaceView extends BorderPane {
 
     private final ComboBox<WorkspaceLayoutConfig.LayoutMode> layoutModeBox = new ComboBox<>();
     private final MenuButton addPaneBtn = new MenuButton("+ Add Pane");
+    private final Button studyTrioBtn = new Button("Study Trio (PDF + Cal + OneNote)");
     private final Button resetLayoutBtn = new Button("Reset");
     private final Label paneCountLabel = new Label();
     private final Button fullScreenBtn = new Button("Full Screen");
@@ -60,8 +68,17 @@ public class StudyWorkspaceView extends BorderPane {
     private UiTheme resolvedTheme = UiTheme.CHARCOAL;
     private Consumer<Boolean> onFullScreenToggle;
     private Consumer<String> onStatusChanged;
+    private Runnable onCalendarDataChanged;
     private boolean fullScreenState;
     private boolean suppressingLayoutEvents;
+
+    private static DataFormat resolvePaneDragFormat() {
+        DataFormat existing = DataFormat.lookupMimeType("application/x-calendarorganizer-pane");
+        if (existing != null) {
+            return existing;
+        }
+        return new DataFormat("application/x-calendarorganizer-pane");
+    }
 
     private static final class PaneSlot {
         final WorkspaceLayoutConfig.PaneState state;
@@ -134,6 +151,7 @@ public class StudyWorkspaceView extends BorderPane {
             addPaneBtn.getItems().add(item);
         }
 
+        studyTrioBtn.setOnAction(e -> applyStudyTrioLayout());
         resetLayoutBtn.setOnAction(e -> resetToDefaultLayout());
         paneCountLabel.getStyleClass().add("dim-label");
 
@@ -146,7 +164,17 @@ public class StudyWorkspaceView extends BorderPane {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        HBox toolbar = new HBox(8, layoutLbl, layoutModeBox, addPaneBtn, resetLayoutBtn, paneCountLabel, spacer, fullScreenBtn);
+        HBox toolbar = new HBox(
+                8,
+                layoutLbl,
+                layoutModeBox,
+                addPaneBtn,
+                studyTrioBtn,
+                resetLayoutBtn,
+                paneCountLabel,
+                spacer,
+                fullScreenBtn
+        );
         toolbar.getStyleClass().add("workspace-toolbar");
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.setPadding(new Insets(6, 10, 6, 10));
@@ -170,6 +198,9 @@ public class StudyWorkspaceView extends BorderPane {
     }
 
     private PaneSlot buildSlot(WorkspaceLayoutConfig.PaneState state) {
+        Label gripLabel = new Label("⋮⋮");
+        gripLabel.getStyleClass().add("workspace-drag-grip");
+
         ComboBox<WorkspacePaneType> typeBox = new ComboBox<>();
         typeBox.getItems().setAll(WorkspacePaneType.values());
         typeBox.setValue(state.getType());
@@ -180,7 +211,7 @@ public class StudyWorkspaceView extends BorderPane {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        HBox header = new HBox(6, typeBox, spacer, closeBtn);
+        HBox header = new HBox(6, gripLabel, typeBox, spacer, closeBtn);
         header.getStyleClass().add("workspace-pane-header");
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPadding(new Insets(5, 8, 5, 8));
@@ -205,7 +236,86 @@ public class StudyWorkspaceView extends BorderPane {
             }
         });
         closeBtn.setOnAction(e -> closePane(slot));
+        installSlotDragAndDrop(slot, header);
         return slot;
+    }
+
+    private void installSlotDragAndDrop(PaneSlot slot, HBox header) {
+        header.setOnDragDetected(ev -> {
+            int sourceIndex = slots.indexOf(slot);
+            if (sourceIndex < 0) {
+                return;
+            }
+            Dragboard db = header.startDragAndDrop(TransferMode.MOVE);
+            ClipboardContent clip = new ClipboardContent();
+            clip.put(PANE_DRAG_FORMAT, Integer.toString(sourceIndex));
+            db.setContent(clip);
+            ev.consume();
+        });
+
+        slot.frame.setOnDragOver(ev -> {
+            Dragboard db = ev.getDragboard();
+            if (db.hasContent(PANE_DRAG_FORMAT)) {
+                String raw = String.valueOf(db.getContent(PANE_DRAG_FORMAT));
+                int sourceIndex = parseIndex(raw);
+                int targetIndex = slots.indexOf(slot);
+                if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex != targetIndex) {
+                    ev.acceptTransferModes(TransferMode.MOVE);
+                    if (!slot.frame.getStyleClass().contains("workspace-drop-target")) {
+                        slot.frame.getStyleClass().add("workspace-drop-target");
+                    }
+                }
+            }
+            ev.consume();
+        });
+
+        slot.frame.setOnDragExited(ev -> {
+            slot.frame.getStyleClass().remove("workspace-drop-target");
+            ev.consume();
+        });
+
+        slot.frame.setOnDragDropped(ev -> {
+            slot.frame.getStyleClass().remove("workspace-drop-target");
+            boolean success = false;
+            Dragboard db = ev.getDragboard();
+            if (db.hasContent(PANE_DRAG_FORMAT)) {
+                int sourceIndex = parseIndex(String.valueOf(db.getContent(PANE_DRAG_FORMAT)));
+                int targetIndex = slots.indexOf(slot);
+                if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex != targetIndex) {
+                    swapSlotPositions(sourceIndex, targetIndex);
+                    success = true;
+                }
+            }
+            ev.setDropCompleted(success);
+            ev.consume();
+        });
+
+        header.setOnDragDone(ev -> {
+            for (PaneSlot candidate : slots) {
+                candidate.frame.getStyleClass().remove("workspace-drop-target");
+            }
+            ev.consume();
+        });
+    }
+
+    private static int parseIndex(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
+    private void swapSlotPositions(int sourceIndex, int targetIndex) {
+        captureLiveDividersIntoConfig();
+        Collections.swap(slots, sourceIndex, targetIndex);
+        rebuildLayoutGraph();
+        syncDockedPanesAfterRelayout();
+        scheduleLayoutSave();
+        publishStatus("Swapped workspace pane positions.");
     }
 
     private WorkspacePaneContent createPaneContent(WorkspaceLayoutConfig.PaneState state) {
@@ -219,18 +329,20 @@ public class StudyWorkspaceView extends BorderPane {
             );
         }
         if (type == WorkspacePaneType.ONENOTE) {
-            return new ExternalAppWorkspacePane(
+            return new OneNoteDockPane(
                     state,
-                    this::publishStatus,
-                    this::scheduleLayoutSave
+                    this::publishStatus
             );
         }
         if (type == WorkspacePaneType.CALENDAR) {
-            return new NotesWorkspacePane(
-                    courseManager,
-                    state,
+            return new CalendarWorkspacePane(
+                    calendarService,
                     this::publishStatus,
-                    this::scheduleLayoutSave
+                    () -> {
+                        if (onCalendarDataChanged != null) {
+                            onCalendarDataChanged.run();
+                        }
+                    }
             );
         }
         LectureWorkspacePane lecturePane = new LectureWorkspacePane(
@@ -302,6 +414,15 @@ public class StudyWorkspaceView extends BorderPane {
         publishStatus("Closed pane.");
     }
 
+    private void applyStudyTrioLayout() {
+        flushPendingEdits();
+        layoutConfig = WorkspaceLayoutConfig.studyTrioConfig();
+        initializeFromConfig();
+        applyCoursesToAllSlots();
+        scheduleLayoutSave();
+        publishStatus("Loaded Study Trio: Lecture Viewer + Calendar + OneNote Dock.");
+    }
+
     private void resetToDefaultLayout() {
         flushPendingEdits();
         layoutConfig = WorkspaceLayoutConfig.defaultConfig();
@@ -342,12 +463,12 @@ public class StudyWorkspaceView extends BorderPane {
                 attachDividerListeners(primarySplit);
                 splitContainer.getChildren().setAll(primarySplit);
             } else if (count == 3) {
-                secondGroupSplit = createSplit(Orientation.VERTICAL, slots.get(1).frame, slots.get(2).frame);
-                primarySplit = createSplit(Orientation.HORIZONTAL, slots.get(0).frame, secondGroupSplit);
+                firstGroupSplit = createSplit(Orientation.VERTICAL, slots.get(0).frame, slots.get(1).frame);
+                primarySplit = createSplit(Orientation.HORIZONTAL, firstGroupSplit, slots.get(2).frame);
                 applyDividerPositions(primarySplit, layoutConfig.getPrimaryDividers());
-                applyDividerPositions(secondGroupSplit, layoutConfig.getSecondGroupDividers());
+                applyDividerPositions(firstGroupSplit, layoutConfig.getFirstGroupDividers());
                 attachDividerListeners(primarySplit);
-                attachDividerListeners(secondGroupSplit);
+                attachDividerListeners(firstGroupSplit);
                 splitContainer.getChildren().setAll(primarySplit);
             } else {
                 firstGroupSplit = createSplit(Orientation.HORIZONTAL, slots.get(0).frame, slots.get(1).frame);
@@ -526,6 +647,10 @@ public class StudyWorkspaceView extends BorderPane {
         this.onStatusChanged = listener;
     }
 
+    public void setOnCalendarDataChanged(Runnable listener) {
+        this.onCalendarDataChanged = listener;
+    }
+
     public void setActiveTheme(UiTheme resolved) {
         if (resolved == null) {
             return;
@@ -546,8 +671,48 @@ public class StudyWorkspaceView extends BorderPane {
         }
     }
 
+    private void syncDockedPanesAfterRelayout() {
+        Platform.runLater(() -> {
+            for (PaneSlot slot : slots) {
+                if (slot.content instanceof OneNoteDockPane) {
+                    ((OneNoteDockPane) slot.content).requestCoalescedBoundsSync();
+                }
+            }
+        });
+    }
+
     public void onTabActivated() {
         refreshCoursesAsync();
+        for (PaneSlot slot : slots) {
+            if (slot.content instanceof CalendarWorkspacePane) {
+                ((CalendarWorkspacePane) slot.content).refreshCalendar();
+            } else if (slot.content instanceof OneNoteDockPane) {
+                ((OneNoteDockPane) slot.content).onHostShown();
+            }
+        }
+    }
+
+    public void onTabDeactivated() {
+        flushPendingEdits();
+        for (PaneSlot slot : slots) {
+            if (slot.content instanceof OneNoteDockPane) {
+                ((OneNoteDockPane) slot.content).onHostHidden();
+            } else {
+                slot.content.releaseResources();
+            }
+        }
+    }
+
+    public void setDockTemporarilyDetached(boolean detached) {
+        for (PaneSlot slot : slots) {
+            if (slot.content instanceof OneNoteDockPane) {
+                if (detached) {
+                    ((OneNoteDockPane) slot.content).onHostHidden();
+                } else {
+                    ((OneNoteDockPane) slot.content).onHostShown();
+                }
+            }
+        }
     }
 
     public void releaseTransientCaches() {

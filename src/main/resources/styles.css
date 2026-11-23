@@ -845,3 +845,34 @@
     -fx-background-color: #fde9eb;
     -fx-text-fill: #8d1c27;
 }
+
+.workspace-drag-grip {
+    -fx-text-fill: -lc-dim;
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+    -fx-padding: 0 4 0 2;
+    -fx-cursor: open-hand;
+}
+
+.workspace-drop-target {
+    -fx-border-color: -lc-accent;
+    -fx-border-width: 2;
+}
+
+.workspace-dock-host {
+    -fx-background-color: -lc-grid-bg;
+    -fx-border-color: -lc-divider;
+    -fx-border-width: 1;
+    -fx-padding: 12;
+}
+
+.workspace-dock-hover {
+    -fx-background-color: derive(-lc-accent, -78%);
+    -fx-border-color: -lc-accent;
+    -fx-border-width: 2;
+    -fx-border-style: dashed;
+}
+
+.theme-paper .workspace-dock-hover {
+    -fx-background-color: derive(-lc-accent, 85%);
+}
