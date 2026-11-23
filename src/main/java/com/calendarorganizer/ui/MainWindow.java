@@ -182,7 +182,7 @@ public class MainWindow extends BorderPane {
             view.setActiveTheme(getResolvedTheme());
             view.setOnStatusChanged(this::updateStatus);
             view.setOnStateChanged(this::refreshCourseFooterUi);
-            view.setOnRenderRequested(this::openRenderPane);
+            view.setOnRenderRequested(this::toggleRenderPane);
             view.setOnSortOrderChanged(order ->
                     AppExecutors.ioExecutor().execute(() -> calendarService.saveCourseSortOrder(order.getId())));
             String filter = courseSearchField.getText();
@@ -298,8 +298,9 @@ public class MainWindow extends BorderPane {
 
     private HBox buildCourseActionsBox() {
         renderCourseBtn.getStyleClass().add("lc-btn-primary");
+        renderCourseBtn.setMinWidth(Region.USE_PREF_SIZE);
         renderCourseBtn.setDisable(true);
-        renderCourseBtn.setOnAction(e -> openRenderPane());
+        renderCourseBtn.setOnAction(e -> toggleRenderPane());
 
         exportCourseBtn.setOnAction(e -> {
             if (courseTabView != null) {
@@ -417,6 +418,14 @@ public class MainWindow extends BorderPane {
                 && (workspaceSplit.getItems().contains(lectureRenderPane) || renderFullScreen);
     }
 
+    private void toggleRenderPane() {
+        if (isRenderPaneOpen()) {
+            closeRenderPane();
+        } else {
+            openRenderPane();
+        }
+    }
+
     private void openRenderPane() {
         CourseTabView view = ensureCourseTabView();
         Course selectedCourse = view.getSelectedCourse();
@@ -444,6 +453,7 @@ public class MainWindow extends BorderPane {
                 view.getSelectedItem(),
                 view.getActiveSortOrder()
         );
+        updateRenderButtonStates();
     }
 
     private void closeRenderPane() {
@@ -456,6 +466,21 @@ public class MainWindow extends BorderPane {
         workspaceSplit.getItems().setAll(mainContentHost);
         if (lectureRenderPane != null) {
             lectureRenderPane.releaseResources();
+        }
+        updateRenderButtonStates();
+    }
+
+    private void updateRenderButtonStates() {
+        boolean open = isRenderPaneOpen();
+        if (open) {
+            renderCourseBtn.setText("Close Render");
+        } else {
+            renderCourseBtn.setText("Render");
+        }
+        boolean hasSelected = courseTabView != null && courseTabView.hasSelectedCourse();
+        renderCourseBtn.setDisable(!open && !hasSelected);
+        if (courseTabView != null) {
+            courseTabView.setRenderOpenState(open);
         }
     }
 
@@ -723,15 +748,14 @@ public class MainWindow extends BorderPane {
         if (courseTabView != null) {
             coursePathBottomLabel.setText(courseTabView.getActiveLocationSummary());
             boolean hasSelected = courseTabView.hasSelectedCourse();
-            renderCourseBtn.setDisable(!hasSelected);
             exportCourseBtn.setDisable(!hasSelected);
             exportAllBtn.setDisable(!courseTabView.hasCourses());
         } else {
             coursePathBottomLabel.setText("No course file selected");
-            renderCourseBtn.setDisable(true);
             exportCourseBtn.setDisable(true);
             exportAllBtn.setDisable(true);
         }
+        updateRenderButtonStates();
     }
 
     private void refreshStatsAsync() {

@@ -115,6 +115,7 @@ public class CourseTabView extends BorderPane {
     private boolean dirty;
     private boolean loadingEditor;
     private boolean railVisible = true;
+    private boolean renderOpen;
     private UiTheme activeTheme = UiTheme.CHARCOAL;
     private String lastStatus = "Ready.";
     private Consumer<String> onStatusChanged;
@@ -160,7 +161,7 @@ public class CourseTabView extends BorderPane {
                 newItemButton.setDisable(true);
                 importFileButton.setDisable(true);
                 openFolderButton.setDisable(true);
-                renderCourseButton.setDisable(true);
+                renderCourseButton.setDisable(!renderOpen);
                 itemListView.getItems().clear();
                 clearEditor();
             }
@@ -186,6 +187,7 @@ public class CourseTabView extends BorderPane {
     private VBox buildSectionFilesPane() {
         courseHeading.getStyleClass().add("section-heading");
         renderCourseButton.getStyleClass().add("lc-btn-primary");
+        renderCourseButton.setMinWidth(Region.USE_PREF_SIZE);
         renderCourseButton.setDisable(true);
         renderCourseButton.setOnAction(e -> {
             if (onRenderRequested != null) {
@@ -284,12 +286,16 @@ public class CourseTabView extends BorderPane {
 
     private VBox buildEditorPane() {
         pathHeader.getStyleClass().add("dim-label");
+        pathHeader.setMinWidth(0);
         dirtyIndicator.getStyleClass().add("caution-label");
 
+        openFileButton.setMinWidth(Region.USE_PREF_SIZE);
         openFileButton.setDisable(true);
         openFileButton.setOnAction(e -> handleOpenExternalFile());
+        openFolderButton.setMinWidth(Region.USE_PREF_SIZE);
         openFolderButton.setDisable(true);
         openFolderButton.setOnAction(e -> handleOpenSectionFolder());
+        saveButton.setMinWidth(Region.USE_PREF_SIZE);
         saveButton.setDisable(true);
         saveButton.setOnAction(e -> handleSaveItem());
 
@@ -556,6 +562,16 @@ public class CourseTabView extends BorderPane {
 
     public void setOnRenderRequested(Runnable listener) {
         this.onRenderRequested = listener;
+    }
+
+    public void setRenderOpenState(boolean open) {
+        this.renderOpen = open;
+        if (open) {
+            renderCourseButton.setText("Close Render");
+        } else {
+            renderCourseButton.setText("Render");
+        }
+        renderCourseButton.setDisable(!open && selectedCourse == null);
     }
 
     public void setSortOrder(CourseSortOrder order) {

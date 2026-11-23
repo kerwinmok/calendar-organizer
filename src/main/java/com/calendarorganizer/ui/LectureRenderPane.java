@@ -19,6 +19,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
@@ -73,11 +74,11 @@ public class LectureRenderPane extends BorderPane {
             }
     );
 
-    private final Label titleLabel = new Label("Lecture Reader");
+    private final Label titleLabel = new Label("Lecture");
     private final ComboBox<LectureRenderModel.Scope> scopeBox = new ComboBox<>();
-    private final Button refreshBtn = new Button("Refresh");
-    private final Button fullScreenBtn = new Button("Full Screen");
-    private final Button closeBtn = new Button("Close");
+    private final Button refreshBtn = new Button("↻");
+    private final Button fullScreenBtn = new Button("Full");
+    private final Button closeBtn = new Button("✕ Close");
 
     private final Button prevFileBtn = new Button("<");
     private final ComboBox<CourseItem> filePickerBox = new ComboBox<>();
@@ -121,17 +122,27 @@ public class LectureRenderPane extends BorderPane {
 
     private VBox buildToolbar() {
         titleLabel.getStyleClass().add("section-heading");
+        titleLabel.setMinWidth(0);
 
         scopeBox.getItems().setAll(LectureRenderModel.Scope.values());
         scopeBox.setValue(LectureRenderModel.Scope.ALL_IN_COURSE);
+        scopeBox.setMinWidth(90);
         scopeBox.setOnAction(e -> reloadCurrentContext());
 
+        refreshBtn.setMinWidth(Region.USE_PREF_SIZE);
+        refreshBtn.setTooltip(new Tooltip("Refresh rendered files"));
         refreshBtn.setOnAction(e -> reloadCurrentContext());
+
+        fullScreenBtn.setMinWidth(Region.USE_PREF_SIZE);
+        fullScreenBtn.setTooltip(new Tooltip("Toggle Full Screen (F11)"));
         fullScreenBtn.setOnAction(e -> {
             if (onFullScreenToggle != null) {
                 onFullScreenToggle.accept(!fullScreenActive);
             }
         });
+
+        closeBtn.setMinWidth(Region.USE_PREF_SIZE);
+        closeBtn.setTooltip(new Tooltip("Close Render pane"));
         closeBtn.setOnAction(e -> {
             if (onCloseRequested != null) {
                 onCloseRequested.run();
@@ -140,15 +151,18 @@ public class LectureRenderPane extends BorderPane {
 
         Region topSpacer = new Region();
         HBox.setHgrow(topSpacer, Priority.ALWAYS);
-        HBox headerRow = new HBox(8, titleLabel, scopeBox, refreshBtn, topSpacer, fullScreenBtn, closeBtn);
+        HBox headerRow = new HBox(6, titleLabel, scopeBox, refreshBtn, topSpacer, fullScreenBtn, closeBtn);
         headerRow.getStyleClass().add("lc-subbar");
         headerRow.setAlignment(Pos.CENTER_LEFT);
 
+        prevFileBtn.setMinWidth(Region.USE_PREF_SIZE);
         prevFileBtn.setOnAction(e -> stepPickerFile(-1));
+        nextFileBtn.setMinWidth(Region.USE_PREF_SIZE);
         nextFileBtn.setOnAction(e -> stepPickerFile(1));
 
         filePickerBox.setMaxWidth(Double.MAX_VALUE);
-        filePickerBox.setPrefWidth(250);
+        filePickerBox.setMinWidth(60);
+        filePickerBox.setPrefWidth(150);
         HBox.setHgrow(filePickerBox, Priority.ALWAYS);
         filePickerBox.setCellFactory(list -> new ListCell<>() {
             @Override
@@ -183,11 +197,16 @@ public class LectureRenderPane extends BorderPane {
         });
 
         summaryLabel.getStyleClass().add("dim-label");
+        summaryLabel.setMinWidth(0);
+        zoomOutBtn.setMinWidth(Region.USE_PREF_SIZE);
         zoomOutBtn.setOnAction(e -> adjustZoom(-ZOOM_STEP));
+        zoomInBtn.setMinWidth(Region.USE_PREF_SIZE);
         zoomInBtn.setOnAction(e -> adjustZoom(ZOOM_STEP));
+        zoomFitBtn.setMinWidth(Region.USE_PREF_SIZE);
+        zoomFitBtn.setTooltip(new Tooltip("Fit width"));
         zoomFitBtn.setOnAction(e -> resetZoomToFit());
         zoomReadoutLabel.getStyleClass().add("dim-label");
-        zoomReadoutLabel.setMinWidth(40);
+        zoomReadoutLabel.setMinWidth(Region.USE_PREF_SIZE);
         zoomReadoutLabel.setAlignment(Pos.CENTER);
 
         HBox pickerRow = new HBox(
@@ -261,9 +280,20 @@ public class LectureRenderPane extends BorderPane {
         this.onStatusChanged = listener;
     }
 
+    public void setEmbeddedMode(boolean embedded) {
+        fullScreenBtn.setVisible(!embedded);
+        fullScreenBtn.setManaged(!embedded);
+        closeBtn.setVisible(!embedded);
+        closeBtn.setManaged(!embedded);
+    }
+
     public void setFullScreenState(boolean fullScreen) {
         this.fullScreenActive = fullScreen;
-        fullScreenBtn.setText(fullScreen ? "Exit Full Screen" : "Full Screen");
+        if (fullScreen) {
+            fullScreenBtn.setText("Exit");
+        } else {
+            fullScreenBtn.setText("Full");
+        }
     }
 
     public boolean isFullScreenActive() {

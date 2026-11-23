@@ -38,6 +38,7 @@ public class LectureWorkspacePane extends BorderPane implements WorkspacePaneCon
         this.paneState = paneState;
         this.onLayoutStateChanged = onLayoutStateChanged;
         this.renderPane = new LectureRenderPane(courseManager, previewer);
+        this.renderPane.setEmbeddedMode(true);
         this.renderPane.setOnFullScreenToggle(onFullScreenToggle);
         this.renderPane.setOnCloseRequested(onCloseRequested);
         this.renderPane.setOnStatusChanged(onStatusChanged);
